@@ -1,0 +1,33 @@
+{
+  "name": "@scirexs/fetchy",
+  "version": "0.0.1",
+  "license": "MIT",
+  "exports": "./src/mod.ts",
+  "publish": {
+    "include": [
+      "src/",
+      "README.md",
+      "LICENSE",
+      "deno.json"
+    ]
+  },
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "tasks": {
+    "dev": "deno test --watch"
+  },
+  "lint": {
+    "include": ["src/", "tests/"],
+    "rules": {
+      "tags": ["recommended"],
+      "exclude": ["no-unused-vars", "no-window"]
+    }
+  },
+  "fmt": {
+    "include": ["src/", "tests/"],
+    "lineWidth": 140
+  }
+}
