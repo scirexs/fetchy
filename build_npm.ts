@@ -22,7 +22,7 @@ await build({
     version: packageInfo.version,
     type: "module",
     sideEffects: false,
-    description: "A light fetch wrapper.",
+    description: "A lightweight fetch wrapper.",
     author: "scirexs",
     license: "MIT",
     repository: {
