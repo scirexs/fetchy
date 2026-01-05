@@ -1,10 +1,10 @@
 # fetchy
 
-A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing.
-
 [![npm version](https://img.shields.io/npm/v/%40scirexs%2Ffetchy)](https://www.npmjs.com/package/@scirexs/fetchy)
 [![JSR](https://img.shields.io/jsr/v/%40scirexs/fetchy)](https://jsr.io/@scirexs/fetchy)
 [![license](https://img.shields.io/github/license/scirexs/fetchy)](https://github.com/scirexs/fetchy/blob/main/LICENSE)
+
+A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing.
 
 ## Features
 
@@ -52,8 +52,8 @@ console.log(user?.name);
 Performs an HTTP request and returns the raw Response object.
 
 #### Parameters
-- `url`: string | URL | Request - The request URL
-- `options`: FetchyOptions (optional) - Configuration options
+- `url`: `string | URL | Request` - The request URL
+- `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
 `Promise<Response | null>`
@@ -78,9 +78,9 @@ if (response?.ok) {
 Performs an HTTP request and automatically parses the response body.
 
 #### Parameters
-- `url`: string | URL | Request - The request URL
-- `type`: "text" | "json" | "bytes" | "auto" (default: "auto") - Response parsing type
-- `options`: FetchyOptions (optional) - Configuration options
+- `url`: `string | URL | Request` - The request URL
+- `type`: `"text" | "json" | "bytes" | "auto"` (default: `"auto"`) - Response parsing type
+- `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
 `Promise<T | string | Uint8Array | null>`
