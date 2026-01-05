@@ -4,16 +4,7 @@ import packageInfo from "./deno.json" with { type: "json" };
 await emptyDir("./npm");
 
 await build({
-  entryPoints: [
-    {
-      name: "./client",
-      path: "./src/client/mod.ts",
-    },
-    {
-      name: "./server",
-      path: "./src/server/mod.ts",
-    },
-  ],
+  entryPoints: ["./src/mod.ts"],
   outDir: "./npm",
   scriptModule: false,
   typeCheck: false,
@@ -23,31 +14,28 @@ await build({
     deno: false,
   },
   compilerOptions: {
-    lib: ["ES2023"],
+    lib: ["ESNext"],
     target: "ES2023",
   },
   package: {
-    name: "@scirexs/srp6a",
+    name: "@scirexs/fetchy",
     version: packageInfo.version,
     type: "module",
     sideEffects: false,
-    description: "SRP-6a (Secure Remote Password) implementation in TypeScript for browser and server.",
+    description: "A light fetch wrapper.",
     author: "scirexs",
     license: "MIT",
     repository: {
       type: "git",
-      url: "git+https://github.com/scirexs/srp6a.git"
+      url: "git+https://github.com/scirexs/fetchy.git"
     },
     keywords: [
-      "authentication",
-      "srp",
-      "srp6a",
-      "secure-remote-password",
+      "fetch",
       "typescript",
     ],
-    homepage: "https://github.com/scirexs/srp6a#readme",
+    homepage: "https://github.com/scirexs/fetchy#readme",
     bugs: {
-      url: "https://github.com/scirexs/srp6a/issues"
+      url: "https://github.com/scirexs/fetchy/issues"
     },
   },
   postBuild() {
