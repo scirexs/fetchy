@@ -11,7 +11,7 @@ A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handli
 - **Lightweight** - Zero dependencies, works in Deno, Node.js, and browsers
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
-- **Smart Retry Logic** - Exponential backoff with Retry-After header support
+- **Retry Logic** - Exponential backoff with Retry-After header support
 - **Type-Safe** - Full TypeScript support with generic type inference
 - **Bearer Token Helper** - Built-in Authorization header management
 - **Jitter Support** - Prevent thundering herd with randomized delays
@@ -105,16 +105,20 @@ const html = await fetchyb("https://example.com", "text");
 const image = await fetchyb("https://example.com/image.png", "bytes");
 ```
 
-## Configuration Options
+## Configurations
 
-### FetchyOptions
+### API Options
+
+#### `FetchyOptions`
+
 ```ts
 interface FetchyOptions {
   // Standard fetch options (method, headers, etc.)
   method?: string;
   headers?: HeadersInit;
   
-  // Request body (auto-serializes JSON)
+  // Request body (auto-serializes JSON, ReadableStream is NOT supported)
+  // type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
   body?: JSONValue | FormData | URLSearchParams | Blob | ArrayBuffer | string;
   
   // Timeout in seconds (default: 15)
@@ -148,7 +152,8 @@ interface FetchyOptions {
 }
 ```
 
-### Default Values
+#### Default Values
+
 ```ts
 {
   timeout: 15,           // 15 seconds
@@ -166,6 +171,44 @@ interface FetchyOptions {
   redirect: "follow"     // Follow redirects
 }
 ```
+
+### Auto-Configurations
+
+#### Method
+
+If a body is passed as an option without specifying a method, the method will default to "POST".
+
+#### Headers
+
+If the following headers are not specified, they will be automatically set:
+
+- Accept: `application/json, text/plain`
+- Content-Type: Automatically determined based on the body type:
+  - `string`, `URLSearchParams`, `FormData`, `Blob` with type: Not set by this package; [`fetch` will set it automatically](https://fetch.spec.whatwg.org/#concept-bodyinit-extract).
+  - `JSONValue`: `application/json`
+  - `Blob` without type: `application/octet-stream`
+  - `ArrayBuffer`: `application/octet-stream` 
+- Authorization: Set to `Bearer ${options.bearerToken}` if `options.bearerToken` is provided.
+
+**Note:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
+
+## Error Behavior
+
+### Timeout
+
+If the timeout duration specified in the `timeout` option is exceeded, `abort("timeout")` will be called on the provided AbortController. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
+
+### HTTPStatusError
+
+If `onErrorStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 200 range. The error message format is: `404 Not Found`.
+
+### RedirectError
+
+If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 300 range. The error message format is: `Received redirect response: 301`.
+
+### Others
+
+If the `onError` option is set to `true`, any other errors that occur will be thrown directly.
 
 ## Usage Examples
 
