@@ -372,9 +372,8 @@ function _getHeaders(options?: FetchyOptions): HeadersInit {
  * @returns Content-Type string or undefined.
  */
 function _getContentType(body?: FetchyBody): string | undefined {
-  if (body === void 0 || body instanceof FormData) return;
-  if (_isString(body)) return "text/plain";
-  if (body instanceof URLSearchParams) return "application/x-www-form-urlencoded";
+  if (body === void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams) return;
+  if (body instanceof Blob && body.type) return;
   if (_isJSONObject(body)) return "application/json";
   return "application/octet-stream";
 }

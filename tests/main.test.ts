@@ -356,16 +356,16 @@ Deno.test("_getContentType", async (t) => {
     assertEquals(_getContentType(undefined), undefined);
   });
 
-  await t.step("FormData body", () => {
+  await t.step("FormData body", () => { // fetch will be set `multipart/form-data; boundary=`
     assertEquals(_getContentType(new FormData()), undefined);
   });
 
-  await t.step("string body", () => {
-    assertEquals(_getContentType("text"), "text/plain");
+  await t.step("string body", () => { // fetch will be set `text/plain;charset=UTF-8`
+    assertEquals(_getContentType("text"), undefined);
   });
 
-  await t.step("URLSearchParams body", () => {
-    assertEquals(_getContentType(new URLSearchParams()), "application/x-www-form-urlencoded");
+  await t.step("URLSearchParams body", () => { // fetch will be set `application/x-www-form-urlencoded;charset=UTF-8`
+    assertEquals(_getContentType(new URLSearchParams()), undefined);
   });
 
   await t.step("JSON object body", () => {
@@ -376,8 +376,9 @@ Deno.test("_getContentType", async (t) => {
     assertEquals(_getContentType(123), "application/json");
   });
 
-  await t.step("Blob body", () => {
+  await t.step("Blob body", () => { // fetch will be set it's type, if exists
     assertEquals(_getContentType(new Blob(["data"])), "application/octet-stream");
+    assertEquals(_getContentType(new Blob(["data"], { type: "image/avif" })), undefined);
   });
 
   await t.step("ArrayBuffer body", () => {
@@ -395,10 +396,10 @@ Deno.test("_getHeaders", async (t) => {
   });
 
   await t.step("adds Content-Type for body", () => {
-    const headers = _getHeaders({ body: "text" });
+    const headers = _getHeaders({ body: new Uint8Array([1, 2, 3]) });
     assertEquals(headers, {
       "Accept": defaultAccept,
-      "Content-Type": "text/plain",
+      "Content-Type": "application/octet-stream",
     });
   });
 
@@ -800,7 +801,7 @@ Deno.test("_fetchWithTimeout", async (t) => {
           const timeoutId = setTimeout(() => resolve(new Response("ok")), 100);
 
           if (init?.signal) {
-            init.signal.addEventListener("abort", () => {
+            init.signal?.addEventListener("abort", () => {
               clearTimeout(timeoutId);
               reject(new DOMException("The operation was aborted.", "AbortError"));
             });
