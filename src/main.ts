@@ -77,7 +77,7 @@ interface Options {
 
 /*=============== Main Code =====================*/
 /**
- * Error thrown when HTTP response has a non-OK status code (4xx, 5xx).
+ * Error thrown when HTTP response has a non-OK status code (4xx, 5xx, ...).
  * Only thrown when throwError.onErrorStatus is set to true.
  *
  * @example
@@ -88,15 +88,28 @@ interface Options {
  *   });
  * } catch (error) {
  *   if (error instanceof HTTPStatusError) {
- *     console.error("HTTP error:", error.message); // e.g., "404 Not Found"
+ *     console.error("HTTP error:", error.message); // e.g., "403 Forbidden: {success:false}"
  *   }
  * }
  * ```
  */
 class HTTPStatusError extends Error {
-  constructor(msg: string) {
+  static #MAX_BODY_LEN = 80;
+  status: number;
+  body: string;
+  constructor(msg: string, status: number, body: string) {
     super(msg);
     this.name = "HTTPStatusError";
+    this.status = status;
+    this.body = body;
+  }
+  static async fromResponse(resp: Response): Promise<InstanceType<typeof this>> {
+    const body = await resp.text();
+    const bodyMsg = body.length > this.#MAX_BODY_LEN
+      ? `${body.slice(0, this.#MAX_BODY_LEN)}... (more ${body.length - this.#MAX_BODY_LEN} chars)`
+      : body || "(no response body)";
+    const msg = `${resp.status} ${resp.statusText}: ${bodyMsg}`;
+    return new this(msg, resp.status, body);
   }
 }
 /**
@@ -116,9 +129,15 @@ class HTTPStatusError extends Error {
  * ```
  */
 class RedirectError extends Error {
-  constructor(msg: string) {
+  status: number;
+  constructor(msg: string, status: number) {
     super(msg);
     this.name = "RedirectError";
+    this.status = status;
+  }
+  static fromResponse(resp: Response): InstanceType<typeof this> {
+    const msg = `${resp.status} ${resp.statusText}`.trim();
+    return new this(msg, resp.status);
   }
 }
 /**
@@ -202,7 +221,7 @@ async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | n
     const opts = _getOptions(options);
     const init = _getRequestInit(options, opts.abort);
     const resp = await _fetchWithRetry(url, init, opts);
-    if (!resp.ok && opts.onErrorStatus) throw new HTTPStatusError(`${resp.status} ${resp.statusText}`.trim());
+    if (!resp.ok && opts.onErrorStatus) throw await HTTPStatusError.fromResponse(resp);
     return resp;
   } catch (e) {
     if (_throwError("onError", options?.throwError)) throw e;
@@ -412,7 +431,7 @@ async function _shouldNotRetry(count: number, opts: Options, resp?: Response): P
     if (opts.userRedirect === "manual") return true;
     if (opts.userRedirect === "error") {
       opts.max = 0;
-      throw new RedirectError(`Received redirect response: ${resp.status}`);
+      throw RedirectError.fromResponse(resp);
     }
   }
   const interval = _getNextInterval(count, opts, resp);

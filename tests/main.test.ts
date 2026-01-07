@@ -41,30 +41,106 @@ class MockResponse extends Response {
 }
 
 Deno.test("HTTPStatusError", async (t) => {
-  await t.step("creates error with correct name and message", () => {
-    const error = new HTTPStatusError("404 Not Found");
+  await t.step("creates error with correct properties", () => {
+    const error = new HTTPStatusError("404 Not Found: Page missing", 404, "Page missing");
     assertEquals(error.name, "HTTPStatusError");
-    assertEquals(error.message, "404 Not Found");
+    assertEquals(error.message, "404 Not Found: Page missing");
+    assertEquals(error.status, 404);
+    assertEquals(error.body, "Page missing");
     assertEquals(error instanceof Error, true);
   });
 
-  await t.step("empty message", () => {
-    const error = new HTTPStatusError("");
-    assertEquals(error.message, "");
+  await t.step("handles empty body in constructor", () => {
+    const error = new HTTPStatusError("500 Internal Server Error", 500, "");
+    assertEquals(error.message, "500 Internal Server Error");
+    assertEquals(error.status, 500);
+    assertEquals(error.body, "");
+  });
+
+  await t.step("fromResponse creates error with normal body", async () => {
+    const mockResponse = new Response("Resource not found", {
+      status: 404,
+      statusText: "Not Found",
+    });
+
+    const error = await HTTPStatusError.fromResponse(mockResponse);
+    assertEquals(error.name, "HTTPStatusError");
+    assertEquals(error.message, "404 Not Found: Resource not found");
+    assertEquals(error.status, 404);
+    assertEquals(error.body, "Resource not found");
+  });
+
+  await t.step("fromResponse handles empty response body", async () => {
+    const mockResponse = new Response("", {
+      status: 500,
+      statusText: "Internal Server Error",
+    });
+
+    const error = await HTTPStatusError.fromResponse(mockResponse);
+    assertEquals(error.message, "500 Internal Server Error: (no response body)");
+    assertEquals(error.status, 500);
+    assertEquals(error.body, "");
+  });
+
+  await t.step("fromResponse truncates long response body in message", async () => {
+    const longBody = "x".repeat(280);
+    const mockResponse = new Response(longBody, {
+      status: 400,
+      statusText: "Bad Request",
+    });
+
+    const error = await HTTPStatusError.fromResponse(mockResponse);
+    assertEquals(error.status, 400);
+    assertEquals(error.body, longBody); // Full body preserved
+    assertEquals(error.message.startsWith("400 Bad Request: " + "x".repeat(80)), true);
+    assertEquals(error.message.includes("... (more 200 chars)"), true);
+  });
+
+  await t.step("fromResponse does not truncate body at exactly MAX_BODY_LEN", async () => {
+    const exactBody = "y".repeat(80);
+    const mockResponse = new Response(exactBody, {
+      status: 403,
+      statusText: "Forbidden",
+    });
+
+    const error = await HTTPStatusError.fromResponse(mockResponse);
+    assertEquals(error.message, `403 Forbidden: ${exactBody}`);
+    assertEquals(error.body, exactBody);
+  });
+
+  await t.step("fromResponse truncates body at MAX_BODY_LEN + 1", async () => {
+    const slightlyLongBody = "z".repeat(81);
+    const mockResponse = new Response(slightlyLongBody, {
+      status: 413,
+      statusText: "Payload Too Large",
+    });
+
+    const error = await HTTPStatusError.fromResponse(mockResponse);
+    assertEquals(error.body, slightlyLongBody); // Full body preserved
+    assertEquals(error.message.startsWith("413 Payload Too Large: " + "z".repeat(80)), true);
+    assertEquals(error.message.includes("... (more 1 chars)"), true);
   });
 });
 
 Deno.test("RedirectError", async (t) => {
-  await t.step("creates error with correct name and message", () => {
-    const error = new RedirectError("301 Moved Permanently");
+  await t.step("creates error with correct properties", () => {
+    const error = new RedirectError("301 Moved Permanently", 301);
     assertEquals(error.name, "RedirectError");
     assertEquals(error.message, "301 Moved Permanently");
+    assertEquals(error.status, 301);
     assertEquals(error instanceof Error, true);
   });
 
-  await t.step("empty message", () => {
-    const error = new RedirectError("");
-    assertEquals(error.message, "");
+  await t.step("fromResponse creates error with normal body", () => {
+    const mockResponse = new Response(null, {
+      status: 301,
+      statusText: "Moved Permanently",
+    });
+
+    const error = RedirectError.fromResponse(mockResponse);
+    assertEquals(error.name, "RedirectError");
+    assertEquals(error.message, "301 Moved Permanently");
+    assertEquals(error.status, 301);
   });
 });
 
@@ -1011,7 +1087,7 @@ Deno.test("_fetchWithRetry", async (t) => {
   });
   await t.step("throw error redirect on when the option is error", async () => {
     const mockFetch = stub(globalThis, "fetch", () => {
-      return Promise.resolve(new MockResponse(false, "", "ok", { status: 301 }));
+      return Promise.resolve(new MockResponse(false, "", "ok", { status: 301, statusText: "Moved Permanently" }));
     });
     try {
       const opts = {
@@ -1024,7 +1100,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       await assertRejects(
         async () => await _fetchWithRetry("https://example.com", { redirect: "manual" }, opts),
         RedirectError,
-        "Received redirect response: 301",
+        "301 Moved Permanently",
       );
     } finally {
       mockFetch.restore();
@@ -1083,7 +1159,7 @@ Deno.test("fetchy", async (t) => {
       await assertRejects(
         () => fetchy("https://example.com", { throwError: { onErrorStatus: true }, retry: false }),
         HTTPStatusError,
-        "404 Not Found",
+        "404 Not Found: Not Found",
       );
     } finally {
       mockFetch.restore();

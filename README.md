@@ -274,29 +274,30 @@ const response = await fetchy("https://api.example.com/data", {
 ```ts
 import { fetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
 
-// Return null on error (default)
-const data = await fetchyb("https://api.example.com/data", "json");
-if (data === null) {
-  console.log("Request failed");
-}
-
-// Throw on error
+// Throw on error (default is same with `fetch`)
 try {
-  const data = await fetchyb("https://api.example.com/data", "json", {
-    throwError: true
-  });
+  const response = await fetchy("https://api.example.com/data");
 } catch (error) {
   console.error("Request failed:", error);
 }
 
+// Return null on error
+const response = await fetchy("https://api.example.com/data", {
+  throwError: false,
+});
+if (response === null) {
+  console.log("Request failed");
+}
+
 // Throw only on HTTP errors
 try {
-  const data = await fetchyb("https://api.example.com/data", "json", {
-    throwError: { onErrorStatus: true }
+  const response = await fetchy("https://api.example.com/data", {
+    throwError: { onError: false, onErrorStatus: true }
   });
 } catch (error) {
   if (error instanceof HTTPStatusError) {
-    console.error("HTTP error:", error.message);  // e.g., "404 Not Found"
+    // You can also use error.status and error.body.
+    console.error("HTTP error:", error.message);  // e.g., "404 Not Found: (no response body)"
   }
 }
 
