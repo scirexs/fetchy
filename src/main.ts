@@ -74,6 +74,11 @@ interface Options {
   abort?: AbortController;
   userRedirect: "follow" | "error" | "manual";
 }
+/**
+ * Infer helper type for response type overload.
+ * @internal
+ */
+type ThrowError = FetchyOptions & Partial<{ throwError: true }> | FetchyOptions & Partial<{ throwError: { onError: true } }>;
 
 /*=============== Main Code =====================*/
 /**
@@ -167,9 +172,17 @@ class RedirectError extends Error {
  * const bytes = await fetchyb("https://example.com/image.png", "bytes");
  * ```
  */
+async function fetchyb(url: Input, type: "text", options?: undefined): Promise<string>;
+async function fetchyb(url: Input, type: "text", options: FetchyOptions & ThrowError): Promise<string>;
 async function fetchyb(url: Input, type: "text", options?: FetchyOptions): Promise<string | null>;
+async function fetchyb<T>(url: Input, type: "json", options?: undefined): Promise<T>;
+async function fetchyb<T>(url: Input, type: "json", options: FetchyOptions & ThrowError): Promise<T>;
 async function fetchyb<T>(url: Input, type: "json", options?: FetchyOptions): Promise<T | null>;
+async function fetchyb(url: Input, type: "bytes", options?: undefined): Promise<Uint8Array>;
+async function fetchyb(url: Input, type: "bytes", options: FetchyOptions & ThrowError): Promise<Uint8Array>;
 async function fetchyb(url: Input, type: "bytes", options?: FetchyOptions): Promise<Uint8Array | null>;
+async function fetchyb<T>(url: Input, type?: "auto", options?: undefined): Promise<T | string | Uint8Array>;
+async function fetchyb<T>(url: Input, type?: "auto", options?: FetchyOptions & ThrowError): Promise<T | string | Uint8Array>;
 async function fetchyb<T>(url: Input, type?: "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null>;
 async function fetchyb<T>(url: Input, type: ParseType = "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null> {
   const resp = await fetchy(url, options);
@@ -216,6 +229,10 @@ async function fetchyb<T>(url: Input, type: ParseType = "auto", options?: Fetchy
  * });
  * ```
  */
+
+async function fetchy(url: Input, options?: undefined): Promise<Response>;
+async function fetchy(url: Input, options: FetchyOptions & ThrowError): Promise<Response>;
+async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | null>;
 async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | null> {
   try {
     const opts = _getOptions(options);

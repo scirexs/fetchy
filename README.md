@@ -56,7 +56,7 @@ Performs an HTTP request and returns the raw Response object.
 - `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
-`Promise<Response | null>`
+`Promise<Response>`; If configure `throwError.onError`, `Promise<Response | null>`
 
 #### Example
 ```ts
@@ -83,7 +83,7 @@ Performs an HTTP request and automatically parses the response body.
 - `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
-`Promise<T | string | Uint8Array | null>`
+`Promise<T | string | Uint8Array>`; If configure `throwError.onError`, `Promise<T | string | Uint8Array | null>`
 
 #### Example
 ```ts
@@ -200,11 +200,11 @@ If the timeout duration specified in the `timeout` option is exceeded, `abort("t
 
 ### HTTPStatusError
 
-If `onErrorStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 200 range. The error message format is: `404 Not Found`.
+If `onErrorStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 200 range. You can access its status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
 
 ### RedirectError
 
-If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 300 range. The error message format is: `Received redirect response: 301`.
+If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 300 range. You can access its status through this error object. The error message format is: `301 Moved Permanently`.
 
 ### Others
 
@@ -355,7 +355,6 @@ interface ApiResponse<T> {
   data: T;
   error?: string;
 }
-
 interface Todo {
   id: number;
   title: string;
@@ -367,9 +366,22 @@ const response = await fetchyb<ApiResponse<Todo>>(
   "json"
 );
 
-if (response?.success) {
+if (response.success) {
   console.log(response.data.title);  // Fully typed
 }
+```
+
+#### Restricting the Return Type
+
+When setting the `throwError` property in `FetchyOptions`, the return type will include `null` even if you set it to `true` or `{ onError: true }`. To prevent this and ensure a non-nullable return type, add `as const` to the `throwError` property value:
+```ts
+interface User {
+  id: number;
+  name: string;
+}
+
+const options = { timeout: 5, throwError: true as const };  // Add `as const`
+const response = await fetchy("https://api.example.com/todos/1", "json", options); // `response` is User (not User | null)
 ```
 
 ## License
