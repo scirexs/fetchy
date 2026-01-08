@@ -1,10 +1,12 @@
-import { assertEquals, assertRejects, assertStrictEquals } from "@std/assert";
+import { assertEquals, assertExists, assertInstanceOf, assertNotStrictEquals, assertRejects, assertStrictEquals } from "@std/assert";
 import { assertSpyCall, assertSpyCalls, stub } from "@std/testing/mock";
 import {
+  _cloneInput,
+  _combineSignal,
   _correctNumber,
+  _DEFAULT,
   _fetchWithJitter,
   _fetchWithRetry,
-  _fetchWithTimeout,
   _getBody,
   _getContentType,
   _getHeaders,
@@ -23,7 +25,6 @@ import {
   _shouldRedirect,
   _throwError,
   _wait,
-  DEFAULT,
   fetchy,
   fetchyb,
   HTTPStatusError,
@@ -242,8 +243,8 @@ Deno.test("_correctNumber", async (t) => {
 
 Deno.test("_throwError", async (t) => {
   await t.step("returns default when throwError is undefined", () => {
-    assertEquals(_throwError("onError", undefined), DEFAULT.onError);
-    assertEquals(_throwError("onErrorStatus", undefined), DEFAULT.onErrorStatus);
+    assertEquals(_throwError("onError", undefined), _DEFAULT.onError);
+    assertEquals(_throwError("onErrorStatus", undefined), _DEFAULT.onErrorStatus);
   });
 
   await t.step("returns throwError boolean value", () => {
@@ -261,17 +262,17 @@ Deno.test("_throwError", async (t) => {
   });
 
   await t.step("returns default when property is undefined in object", () => {
-    assertEquals(_throwError("onError", {}), DEFAULT.onError);
-    assertEquals(_throwError("onErrorStatus", {}), DEFAULT.onErrorStatus);
+    assertEquals(_throwError("onError", {}), _DEFAULT.onError);
+    assertEquals(_throwError("onErrorStatus", {}), _DEFAULT.onErrorStatus);
   });
 });
 
 Deno.test("_getRetryOption", async (t) => {
   await t.step("returns default value when options is undefined", () => {
-    assertEquals(_getRetryOption("interval", 0, undefined), DEFAULT.interval);
-    assertEquals(_getRetryOption("maxInterval", 0, undefined), DEFAULT.maxInterval);
-    assertEquals(_getRetryOption("max", 0, undefined), DEFAULT.max);
-    assertEquals(_getRetryOption("byHeader", false, undefined), DEFAULT.byHeader);
+    assertEquals(_getRetryOption("interval", 0, undefined), _DEFAULT.interval);
+    assertEquals(_getRetryOption("maxInterval", 0, undefined), _DEFAULT.maxInterval);
+    assertEquals(_getRetryOption("max", 0, undefined), _DEFAULT.max);
+    assertEquals(_getRetryOption("byHeader", false, undefined), _DEFAULT.byHeader);
   });
 
   await t.step("returns off value when options is false", () => {
@@ -287,28 +288,27 @@ Deno.test("_getRetryOption", async (t) => {
   });
 
   await t.step("returns default when property is undefined", () => {
-    assertEquals(_getRetryOption("interval", 0, {}), DEFAULT.interval);
-    assertEquals(_getRetryOption("maxInterval", 0, {}), DEFAULT.maxInterval);
+    assertEquals(_getRetryOption("interval", 0, {}), _DEFAULT.interval);
+    assertEquals(_getRetryOption("maxInterval", 0, {}), _DEFAULT.maxInterval);
   });
 
   await t.step("corrects negative numbers", () => {
-    assertEquals(_getRetryOption("interval", 0, { interval: -5 }), DEFAULT.interval);
-    assertEquals(_getRetryOption("max", 0, { max: -1 }), DEFAULT.max);
+    assertEquals(_getRetryOption("interval", 0, { interval: -5 }), _DEFAULT.interval);
+    assertEquals(_getRetryOption("max", 0, { max: -1 }), _DEFAULT.max);
   });
 });
 
 Deno.test("_getOptions", async (t) => {
   await t.step("returns default options when no options provided", () => {
     const opts = _getOptions(undefined);
-    assertEquals(opts.timeout, DEFAULT.timeout);
-    assertEquals(opts.jitter, DEFAULT.jitter);
-    assertEquals(opts.interval, DEFAULT.interval);
-    assertEquals(opts.maxInterval, DEFAULT.maxInterval);
-    assertEquals(opts.max, DEFAULT.max);
-    assertEquals(opts.byHeader, DEFAULT.byHeader);
-    assertEquals(opts.onErrorStatus, DEFAULT.onErrorStatus);
-    assertEquals(opts.userRedirect, DEFAULT.userRedirect);
-    assertEquals(typeof opts.abort, "object");
+    assertEquals(opts.timeout, _DEFAULT.timeout);
+    assertEquals(opts.jitter, _DEFAULT.jitter);
+    assertEquals(opts.interval, _DEFAULT.interval);
+    assertEquals(opts.maxInterval, _DEFAULT.maxInterval);
+    assertEquals(opts.max, _DEFAULT.max);
+    assertEquals(opts.byHeader, _DEFAULT.byHeader);
+    assertEquals(opts.onErrorStatus, _DEFAULT.onErrorStatus);
+    assertEquals(opts.userRedirect, _DEFAULT.userRedirect);
   });
 
   await t.step("overrides timeout", () => {
@@ -342,22 +342,6 @@ Deno.test("_getOptions", async (t) => {
   await t.step("enables onErrorStatus with throwError option", () => {
     const opts = _getOptions({ throwError: { onErrorStatus: true } });
     assertEquals(opts.onErrorStatus, true);
-  });
-
-  await t.step("uses provided abort controller", () => {
-    const abort = new AbortController();
-    const opts = _getOptions({ abort });
-    assertStrictEquals(opts.abort, abort);
-  });
-
-  await t.step("creates abort controller when timeout is set", () => {
-    const opts = _getOptions({ timeout: 10 });
-    assertEquals(typeof opts.abort, "object");
-  });
-
-  await t.step("no abort controller when timeout is 0 and no abort provided", () => {
-    const opts = _getOptions({ timeout: 0 });
-    assertEquals(opts.abort, undefined);
   });
 });
 
@@ -521,56 +505,218 @@ Deno.test("_getHeaders", async (t) => {
   });
 });
 
+Deno.test("_combineSignal", async (t) => {
+  await t.step("returns undefined when no signals provided", () => {
+    const result = _combineSignal("https://example.com", 0);
+    assertEquals(result, undefined);
+  });
+
+  await t.step("returns signal from Request object", () => {
+    const controller = new AbortController();
+    const request = new Request("https://example.com", { signal: controller.signal });
+    const result = _combineSignal(request, 0);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+
+    controller.abort();
+    assertEquals(result.aborted, true);
+  });
+
+  await t.step("returns signal from options", () => {
+    const controller = new AbortController();
+    const result = _combineSignal("https://example.com", 0, controller.signal);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+
+    controller.abort();
+    assertEquals(result.aborted, true);
+  });
+
+  await t.step("returns timeout signal when timeout is specified", () => {
+    const result = _combineSignal("https://example.com", 0.001);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+  });
+
+  await t.step("combines Request signal and options signal", () => {
+    const controller1 = new AbortController();
+    const controller2 = new AbortController();
+    const request = new Request("https://example.com", { signal: controller1.signal });
+    const result = _combineSignal(request, 0, controller2.signal);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+
+    controller1.abort();
+    assertEquals(result.aborted, true);
+  });
+
+  await t.step("combines all signals including timeout", () => {
+    const controller = new AbortController();
+    const request = new Request("https://example.com", { signal: controller.signal });
+    const result = _combineSignal(request, 1, controller.signal);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+
+    controller.abort();
+    assertEquals(result.aborted, true);
+  });
+
+  await t.step("aborts when any signal is aborted", () => {
+    const controller1 = new AbortController();
+    const controller2 = new AbortController();
+    const result = _combineSignal("https://example.com", 0, controller1.signal);
+
+    // Add second signal manually for testing
+    const signals = [controller1.signal, controller2.signal];
+    const combined = AbortSignal.any(signals);
+
+    assertExists(combined);
+    assertEquals(combined.aborted, false);
+
+    controller2.abort();
+    assertEquals(combined.aborted, true);
+  });
+
+  await t.step("handles already aborted signal", () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = _combineSignal("https://example.com", 0, controller.signal);
+
+    assertExists(result);
+    assertEquals(result.aborted, true);
+  });
+
+  await t.step("ignores null signal", () => {
+    const result = _combineSignal("https://example.com", 0, null);
+    assertEquals(result, undefined);
+  });
+
+  await t.step("handles URL object as input", () => {
+    const controller = new AbortController();
+    const url = new URL("https://example.com");
+    const result = _combineSignal(url, 0, controller.signal);
+
+    assertExists(result);
+    assertEquals(result.aborted, false);
+  });
+
+  await t.step("applies timeout with +1ms buffer", async () => {
+    const startTime = Date.now();
+    const result = _combineSignal("https://example.com", 0.05); // 50ms + 1ms
+
+    assertExists(result);
+
+    await new Promise((resolve) => {
+      result.addEventListener("abort", resolve);
+    });
+
+    const elapsed = Date.now() - startTime;
+    // Should abort around 51ms, allow some tolerance
+    assertEquals(elapsed >= 50 && elapsed < 100, true);
+  });
+
+  await t.step("handles zero timeout", () => {
+    const result = _combineSignal("https://example.com", 0);
+    assertEquals(result, undefined);
+  });
+
+  await t.step("handles negative timeout", () => {
+    const result = _combineSignal("https://example.com", -1);
+    assertEquals(result, undefined);
+  });
+});
+
 Deno.test("_getRequestInit", async (t) => {
   await t.step("default GET request", () => {
-    const init = _getRequestInit("", undefined, undefined);
+    const init = _getRequestInit("", _DEFAULT, undefined);
     assertEquals(init.method, "GET");
     assertEquals(init.headers, {
       "Accept": "application/json, text/plain",
     });
-    assertEquals(init.signal, undefined);
+    assertExists(init.signal);
     assertEquals(init.body, undefined);
   });
 
   await t.step("POST request with body", () => {
-    const init = _getRequestInit("", { body: "text" }, undefined);
+    const init = _getRequestInit("", _DEFAULT, { body: "text" });
     assertEquals(init.method, "POST");
     assertEquals(init.body, "text");
   });
 
-  await t.step("Method of Request obj is respected", () => {
+  await t.step("method of Request obj is respected", () => {
     const req = new Request("https://example.com", { method: "PUT" });
-    const init = _getRequestInit(req, { body: "text" }, undefined);
+    const init = _getRequestInit(req, _DEFAULT, { body: "text" });
     assertEquals(init.method, "PUT");
     assertEquals(init.body, "text");
   });
 
-  await t.step("Method of option is most respected", () => {
+  await t.step("method of option is most respected", () => {
     const req = new Request("https://example.com", { method: "PUT" });
-    const init = _getRequestInit(req, { method: "POST", body: "text" }, undefined);
+    const init = _getRequestInit(req, _DEFAULT, { method: "POST", body: "text" });
     assertEquals(init.method, "POST");
     assertEquals(init.body, "text");
   });
 
-  await t.step("includes abort signal", () => {
-    const abort = new AbortController();
-    const init = _getRequestInit("", undefined, abort);
-    assertStrictEquals(init.signal, abort.signal);
+  await t.step("no abort signal if no-provided and no-timeout", () => {
+    const opts = {
+      ..._DEFAULT,
+      timeout: 0,
+    };
+    const init = _getRequestInit("", opts, undefined);
+    assertEquals(init.signal, undefined);
+  });
+
+  await t.step("includes abort signal when provided by options", () => {
+    const controller = new AbortController();
+    const opts = {
+      ..._DEFAULT,
+      timeout: 0,
+    };
+    const init = _getRequestInit("", opts, { signal: controller.signal });
+    controller.abort();
+    assertEquals(init.signal?.aborted, true);
+  });
+
+  await t.step("includes abort signal when provided by request", () => {
+    const controller = new AbortController();
+    const req = new Request("https://example.com", { signal: controller.signal });
+    const opts = {
+      ..._DEFAULT,
+      timeout: 0,
+    };
+    const init = _getRequestInit(req, opts, undefined);
+    controller.abort();
+    assertEquals(init.signal?.aborted, true);
+  });
+
+  await t.step("includes abort signal when set timeout", async () => {
+    const opts = {
+      ..._DEFAULT,
+      timeout: 1,
+    };
+    const init = _getRequestInit("", opts, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assertEquals(init.signal?.aborted, true);
   });
 
   await t.step("includes additional options", () => {
-    const init = _getRequestInit("", { mode: "cors", credentials: "include" }, undefined);
+    const init = _getRequestInit("", _DEFAULT, { mode: "cors", credentials: "include" });
     assertEquals(init.mode, "cors");
     assertEquals(init.credentials, "include");
   });
 
   await t.step("body is processed correctly", () => {
-    const init = _getRequestInit("", { body: { key: "value" } }, undefined);
+    const init = _getRequestInit("", _DEFAULT, { body: { key: "value" } });
     assertEquals(init.body, '{"key":"value"}');
   });
 
   await t.step("converts redirect error to manual", () => {
-    const init = _getRequestInit("", { redirect: "error" }, undefined);
+    const init = _getRequestInit("", _DEFAULT, { redirect: "error" });
     assertEquals(init.redirect, "manual");
   });
 });
@@ -706,7 +852,7 @@ Deno.test("_handleRedirectResponse", async (t) => {
 Deno.test("_getNextInterval", async (t) => {
   await t.step("returns false and waits for exponential backoff", () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 3,
       max: 5,
       byHeader: false,
@@ -717,7 +863,7 @@ Deno.test("_getNextInterval", async (t) => {
 
   await t.step("uses Retry-After header when byHeader is true", () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 3,
       max: 5,
     };
@@ -731,7 +877,7 @@ Deno.test("_getNextInterval", async (t) => {
 
   await t.step("uses interval if Retry-After header is smaller than interval when byHeader is true", () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 3,
       maxInterval: 30,
       max: 5,
@@ -746,7 +892,7 @@ Deno.test("_getNextInterval", async (t) => {
 
   await t.step("ignores Retry-After header when byHeader is false", () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 3,
       max: 5,
       byHeader: false,
@@ -763,22 +909,22 @@ Deno.test("_getNextInterval", async (t) => {
 Deno.test("_shouldNotRetry", async (t) => {
   await t.step("returns true when count exceeds max", async () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 1,
     };
-    assertEquals(await _shouldNotRetry(3, opts), true);
-    assertEquals(await _shouldNotRetry(4, opts), true);
+    assertEquals(await _shouldNotRetry(3, {}, opts), true);
+    assertEquals(await _shouldNotRetry(4, {}, opts), true);
   });
 
   await t.step("returns false and waits for exponential backoff", async () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 1.2,
       max: 5,
       byHeader: false,
     };
     const start = Date.now();
-    const result = await _shouldNotRetry(2, opts); // 50ms max
+    const result = await _shouldNotRetry(2, {}, opts); // 50ms max
     const elapsed = Date.now() - start;
     assertEquals(result, false);
     assertEquals(elapsed > 1400, true);
@@ -786,28 +932,49 @@ Deno.test("_shouldNotRetry", async (t) => {
   });
 
   await t.step("returns true when response is ok", async () => {
-    const opts = {
-      ...DEFAULT,
-      interval: 1,
-    };
     const resp = new Response("", { status: 200 });
-    assertEquals(await _shouldNotRetry(1, opts, resp), true);
+    assertEquals(await _shouldNotRetry(1, {}, _DEFAULT, resp), true);
+  });
+
+  await t.step("returns true when signal is aborted", async () => {
+    const controller = new AbortController();
+    const init = { signal: controller.signal };
+    controller.abort();
+    assertEquals(await _shouldNotRetry(1, init, _DEFAULT), true);
+  });
+
+  await t.step("returns true when redirect status and userRedirect is manual", async () => {
+    const opts = {
+      ..._DEFAULT,
+      userRedirect: "manual" as const,
+    };
+    const resp = new Response("", { status: 301 });
+    assertEquals(await _shouldNotRetry(1, {}, opts, resp), true);
+  });
+
+  await t.step("throw RedirectError when redirect status and userRedirect is error", async () => {
+    const opts = {
+      ..._DEFAULT,
+      userRedirect: "error" as const,
+    };
+    const resp = new Response("", { status: 301 });
+    await assertRejects(() => _shouldNotRetry(1, {}, opts, resp), RedirectError);
   });
 
   await t.step("returns true when interval exceeds maxInterval", async () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 5,
       maxInterval: 10,
       max: 5,
     };
     const resp = new Response("", { status: 500 });
-    assertEquals(await _shouldNotRetry(3, opts, resp), true);
+    assertEquals(await _shouldNotRetry(3, {}, opts, resp), true);
   });
 
   await t.step("stops retry when Retry-After exceeds maxInterval", async () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 1,
       maxInterval: 5,
       max: 5,
@@ -816,12 +983,12 @@ Deno.test("_shouldNotRetry", async (t) => {
       status: 429,
       headers: { "Retry-After": "10" },
     });
-    assertEquals(await _shouldNotRetry(1, opts, resp), true);
+    assertEquals(await _shouldNotRetry(1, {}, opts, resp), true);
   });
 
   await t.step("handles invalid Retry-After header", async () => {
     const opts = {
-      ...DEFAULT,
+      ..._DEFAULT,
       interval: 1,
       maxInterval: 5,
       max: 5,
@@ -830,112 +997,105 @@ Deno.test("_shouldNotRetry", async (t) => {
       status: 429,
       headers: { "Retry-After": "invalid" },
     });
-    assertEquals(await _shouldNotRetry(1, opts, resp), true);
+    assertEquals(await _shouldNotRetry(1, {}, opts, resp), true);
   });
 });
 
-Deno.test("_fetchWithTimeout", async (t) => {
-  await t.step("successful fetch", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+Deno.test("_cloneInput", async (t) => {
+  await t.step("returns string input as-is when required is false", () => {
+    const url = "https://example.com";
+    const result = _cloneInput(url, false);
+    assertEquals(result, url);
+  });
 
-    try {
-      const opts = {
-        ...DEFAULT,
-        interval: 1,
-        abort: new AbortController(),
-      };
-      const init = { signal: opts.abort.signal };
-      const resp = await _fetchWithTimeout("https://example.com", init, opts);
-      assertEquals(resp.status, 200);
-      assertEquals(await resp.text(), "ok");
-    } finally {
-      mockFetch.restore();
+  await t.step("returns string input as-is when required is true", () => {
+    const url = "https://example.com";
+    const result = _cloneInput(url, true);
+    assertEquals(result, url);
+  });
+
+  await t.step("returns URL object as-is when required is false", () => {
+    const url = new URL("https://example.com");
+    const result = _cloneInput(url, false);
+    assertStrictEquals(result, url);
+  });
+
+  await t.step("returns URL object as-is when required is true", () => {
+    const url = new URL("https://example.com");
+    const result = _cloneInput(url, true);
+    assertStrictEquals(result, url);
+  });
+
+  await t.step("returns Request as-is when required is false", () => {
+    const request = new Request("https://example.com");
+    const result = _cloneInput(request, false);
+    assertStrictEquals(result, request);
+  });
+
+  await t.step("clones Request when required is true", () => {
+    const request = new Request("https://example.com", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test: "data" }),
+    });
+    const result = _cloneInput(request, true);
+
+    assertInstanceOf(result, Request);
+    assertNotStrictEquals(result, request);
+
+    if (result instanceof Request) {
+      assertEquals(result.url, request.url);
+      assertEquals(result.method, request.method);
+      assertEquals(result.headers.get("Content-Type"), "application/json");
     }
   });
 
-  await t.step("handles fetch error", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
+  await t.step("cloned Request is independent from original", async () => {
+    const request = new Request("https://example.com", {
+      method: "POST",
+      body: JSON.stringify({ test: "data" }),
+    });
+    const cloned = _cloneInput(request, true);
 
-    try {
-      const opts = {
-        ...DEFAULT,
-        interval: 1,
-        abort: new AbortController(),
-      };
-      const init = { signal: opts.abort.signal };
-      await assertRejects(
-        () => _fetchWithTimeout("https://example.com", init, opts),
-        Error,
-        "Network error",
-      );
-    } finally {
-      mockFetch.restore();
+    assertInstanceOf(cloned, Request);
+
+    // Read body from cloned request
+    if (cloned instanceof Request) {
+      await cloned.text();
+      assertEquals(cloned.bodyUsed, true);
+    }
+
+    // Original request body should still be readable
+    assertEquals(request.bodyUsed, false);
+    const originalBody = await request.text();
+    assertEquals(originalBody, JSON.stringify({ test: "data" }));
+  });
+
+  await t.step("handles Request without body", () => {
+    const request = new Request("https://example.com");
+    const result = _cloneInput(request, true);
+
+    assertInstanceOf(result, Request);
+    assertNotStrictEquals(result, request);
+
+    if (result instanceof Request) {
+      assertEquals(result.url, request.url);
+      assertEquals(result.bodyUsed, false);
     }
   });
 
-  await t.step("timeout aborts request", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_input, init) => {
-        // Return a promise that respects the abort signal
-        return new Promise((resolve, reject) => {
-          const timeoutId = setTimeout(() => resolve(new Response("ok")), 100);
-
-          if (init?.signal) {
-            init.signal?.addEventListener("abort", () => {
-              clearTimeout(timeoutId);
-              reject(new DOMException("The operation was aborted.", "AbortError"));
-            });
-          }
-        });
+  await t.step("preserves Request headers when cloning", () => {
+    const request = new Request("https://example.com", {
+      headers: {
+        "Authorization": "Bearer token123",
+        "X-Custom-Header": "custom-value",
       },
-    );
+    });
+    const result = _cloneInput(request, true);
 
-    try {
-      const opts = {
-        ...DEFAULT,
-        timeout: 0.05, // 50ms
-        interval: 1,
-        abort: new AbortController(),
-      };
-      const init = { signal: opts.abort.signal };
-      await assertRejects(
-        () => _fetchWithTimeout("https://example.com", init, opts),
-        Error,
-      );
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("works with Request object", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-
-    try {
-      const opts = {
-        ...DEFAULT,
-        interval: 1,
-        abort: new AbortController(),
-      };
-      const init = { signal: opts.abort.signal };
-      const req = new Request("https://example.com");
-      const resp = await _fetchWithTimeout(req, init, opts);
-      assertEquals(resp.status, 200);
-    } finally {
-      mockFetch.restore();
+    if (result instanceof Request) {
+      assertEquals(result.headers.get("Authorization"), "Bearer token123");
+      assertEquals(result.headers.get("X-Custom-Header"), "custom-value");
     }
   });
 });
@@ -950,7 +1110,7 @@ Deno.test("_fetchWithJitter", async (t) => {
 
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         jitter: 0.05, // Max 50ms
         interval: 1,
         abort: new AbortController(),
@@ -974,7 +1134,7 @@ Deno.test("_fetchWithJitter", async (t) => {
 
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 1,
         abort: new AbortController(),
       };
@@ -998,7 +1158,7 @@ Deno.test("_fetchWithRetry", async (t) => {
 
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 0.01,
         abort: new AbortController(),
       };
@@ -1020,7 +1180,7 @@ Deno.test("_fetchWithRetry", async (t) => {
     });
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 0.01,
         byHeader: false,
         abort: new AbortController(),
@@ -1040,7 +1200,7 @@ Deno.test("_fetchWithRetry", async (t) => {
     );
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 0.01,
         byHeader: false,
         abort: new AbortController(),
@@ -1063,7 +1223,7 @@ Deno.test("_fetchWithRetry", async (t) => {
     );
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 0.01,
         max: 0,
         byHeader: false,
@@ -1084,7 +1244,7 @@ Deno.test("_fetchWithRetry", async (t) => {
     );
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         jitter: 0.01,
         interval: 0.01,
         max: 1,
@@ -1105,7 +1265,7 @@ Deno.test("_fetchWithRetry", async (t) => {
     });
     try {
       const opts = {
-        ...DEFAULT,
+        ..._DEFAULT,
         interval: 0.01,
         byHeader: false,
         userRedirect: "error" as const,
@@ -1132,6 +1292,33 @@ Deno.test("fetchy", async (t) => {
       const resp = await fetchy("https://example.com");
       assertEquals(resp?.status, 200);
       assertEquals(await resp?.text(), "ok");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+  await t.step("successful GET request with option url", async () => {
+    const mockFetch = stub(
+      globalThis,
+      "fetch",
+      () => Promise.resolve(new Response("ok", { status: 200 })),
+    );
+    try {
+      const options = { url: "https://example.com" };
+      const resp = await fetchy(null, options);
+      assertEquals(resp?.status, 200);
+      assertEquals(await resp?.text(), "ok");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+  await t.step("throws Error url is null and no option url", async () => {
+    const mockFetch = stub(
+      globalThis,
+      "fetch",
+      () => Promise.resolve(new Response("ok", { status: 200 })),
+    );
+    try {
+      await assertRejects(() => fetchy(null), Error, "Invalid URL");
     } finally {
       mockFetch.restore();
     }

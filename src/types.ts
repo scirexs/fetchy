@@ -27,7 +27,9 @@ export type FetchyBody = JSONValue | Exclude<BodyInit, ReadableStream>;
  * });
  * ```
  */
-export interface FetchyOptions extends Omit<RequestInit, "body" | "signal"> {
+export interface FetchyOptions extends Omit<RequestInit, "body"> {
+  /** Request URL. Used if call fetchy with null. */
+  url?: string | URL;
   /** Request body content. Automatically serializes JSON objects. */
   body?: FetchyBody;
   /** Request timeout in seconds. Default is 15 seconds. */
@@ -40,8 +42,6 @@ export interface FetchyOptions extends Omit<RequestInit, "body" | "signal"> {
   throwError?: ErrorOptions | boolean;
   /** Initial jitter delay in seconds before sending the request. Adds randomness to prevent thundering herd. */
   jitter?: number;
-  /** AbortController for manual request cancellation. If not provided, an internal controller is created for timeout. */
-  abort?: AbortController;
 }
 
 /**

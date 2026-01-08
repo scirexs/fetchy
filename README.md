@@ -52,7 +52,7 @@ console.log(user?.name);
 Performs an HTTP request and returns the raw Response object.
 
 #### Parameters
-- `url`: `string | URL | Request` - The request URL
+- `url`: `string | URL | Request | null` - The request URL
 - `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
@@ -78,7 +78,7 @@ if (response?.ok) {
 Performs an HTTP request and automatically parses the response body.
 
 #### Parameters
-- `url`: `string | URL | Request` - The request URL
+- `url`: `string | URL | Request | null` - The request URL
 - `type`: `"text" | "json" | "bytes" | "auto"` (default: `"auto"`) - Response parsing type
 - `options`: `FetchyOptions` (optional) - Configuration options
 
@@ -112,17 +112,17 @@ const image = await fetchyb("https://example.com/image.png", "bytes");
 #### `FetchyOptions`
 
 ```ts
-interface FetchyOptions {
+interface FetchyOptions extends RequestInit {
   // Standard fetch options (method, headers, etc.)
   method?: string;
   headers?: HeadersInit;
   
-  // Request body (auto-serializes JSON, ReadableStream is NOT supported)
+  // Request body (auto-serializes JSON; ReadableStream is NOT supported)
   // type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
   body?: JSONValue | FormData | URLSearchParams | Blob | ArrayBuffer | string;
   
   // Timeout in seconds (default: 15)
-  timeout?: number;
+  timeout?: number;  // If you don't want to set it, set it to 0.
   
   // Retry configuration
   retry?: {
@@ -143,12 +143,9 @@ interface FetchyOptions {
   
   // Initial jitter delay in seconds
   jitter?: number;
-  
-  // Manual abort controller (if timeout occur, reason is set to "timeout")
-  abort?: AbortController;
-  
-  // Redirect behavior
-  redirect?: "follow" | "error" | "manual";
+
+  // URL for fetch
+  url?: string | URL;  // If you want to use FetchyOptions instead of Request.
 }
 ```
 
@@ -190,13 +187,15 @@ If the following headers are not specified, they will be automatically set:
   - `ArrayBuffer`: `application/octet-stream` 
 - Authorization: Set to `Bearer ${options.bearerToken}` if `options.bearerToken` is provided.
 
-**Note:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
+**Note1:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
+
+**Note2:** If you pass a body through Request object, Content-Type will NOT be set automatically.
 
 ## Error Behavior
 
 ### Timeout
 
-If the timeout duration specified in the `timeout` option is exceeded, `abort("timeout")` will be called on the provided AbortController. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
+If the timeout duration specified in the `timeout` option is exceeded, aborted by standard method `AbortSignal.timeout()`. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
 
 ### HTTPStatusError
 
@@ -230,6 +229,11 @@ const response = await fetchy("https://api.example.com/data", {
     "X-Custom-Header": "value"
   }
 });
+
+// Reuse options with URL
+const options = { url: "https://api.example.com/data", retry: false };
+await fetchy(null, options);
+await fetchy(null, options);
 ```
 
 ### Authentication
@@ -321,13 +325,17 @@ const response = await fetchy("https://api.example.com/data", {
   retry: { max: 3 }
 });
 
-// Manual abort control
-const controller = new AbortController();
+// Combined abort control
+const controller1 = new AbortController();
+const controller2 = new AbortController();
+const request = new Request("https://api.example.com/data", {
+  signal: controller1.signal
+})
 
-setTimeout(() => controller.abort(), 5000);  // Abort after 5 seconds
+setTimeout(() => controller1.abort(), 5000);  // Abort after 5 seconds
 
-const response = await fetchy("https://api.example.com/data", {
-  abort: controller
+const response = await fetchy(, {
+  signal: controller2.signal
 });
 
 // Form data
@@ -371,7 +379,17 @@ if (response.success) {
 }
 ```
 
-#### Restricting the Return Type
+## Restriction
+
+### ReadableStream as Body
+
+`FetchyOption` is not accepted ReadableStream as a body. If you want to use it, set it to Request, and call with it.
+
+### Content-Type Header
+
+If a body set in a Request object, Content-Type header is NOT set automatically on this package. Therefore, when using Request, you have to explicitly set the Content-Type other than what the `fetch` API sets automatically.
+
+### Infer the Return Type
 
 When setting the `throwError` property in `FetchyOptions`, the return type will include `null` even if you set it to `true` or `{ onError: true }`. To prevent this and ensure a non-nullable return type, add `as const` to the `throwError` property value:
 ```ts
@@ -383,6 +401,10 @@ interface User {
 const options = { timeout: 5, throwError: true as const };  // Add `as const`
 const response = await fetchy("https://api.example.com/todos/1", "json", options); // `response` is User (not User | null)
 ```
+
+### Redirect Error
+
+If set `"error"` to `redirect` property in a options, this package throw `RedirectError` as custom error. This is to handle retries properly.
 
 ## License
 

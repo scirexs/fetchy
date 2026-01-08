@@ -1,8 +1,10 @@
 export {
+  _cloneInput,
+  _combineSignal,
   _correctNumber,
+  _DEFAULT,
   _fetchWithJitter,
   _fetchWithRetry,
-  _fetchWithTimeout,
   _getBody,
   _getContentType,
   _getHeaders,
@@ -21,7 +23,6 @@ export {
   _shouldRedirect,
   _throwError,
   _wait,
-  DEFAULT,
   fetchy,
   fetchyb,
   HTTPStatusError,
@@ -35,7 +36,7 @@ import type { ErrorOptions, FetchyBody, FetchyOptions, RetryOptions } from "./ty
  * Default configuration values for fetchy.
  * These values are used when corresponding options are not specified.
  */
-const DEFAULT: Options = {
+const _DEFAULT: Options = {
   timeout: 15,
   jitter: 0,
   interval: 3,
@@ -71,7 +72,6 @@ interface Options {
   byHeader: boolean;
   onError?: boolean;
   onErrorStatus: boolean;
-  abort?: AbortController;
   userRedirect: "follow" | "error" | "manual";
 }
 /**
@@ -172,19 +172,19 @@ class RedirectError extends Error {
  * const bytes = await fetchyb("https://example.com/image.png", "bytes");
  * ```
  */
-async function fetchyb(url: Input, type: "text", options?: undefined): Promise<string>;
-async function fetchyb(url: Input, type: "text", options: FetchyOptions & ThrowError): Promise<string>;
-async function fetchyb(url: Input, type: "text", options?: FetchyOptions): Promise<string | null>;
-async function fetchyb<T>(url: Input, type: "json", options?: undefined): Promise<T>;
-async function fetchyb<T>(url: Input, type: "json", options: FetchyOptions & ThrowError): Promise<T>;
-async function fetchyb<T>(url: Input, type: "json", options?: FetchyOptions): Promise<T | null>;
-async function fetchyb(url: Input, type: "bytes", options?: undefined): Promise<Uint8Array>;
-async function fetchyb(url: Input, type: "bytes", options: FetchyOptions & ThrowError): Promise<Uint8Array>;
-async function fetchyb(url: Input, type: "bytes", options?: FetchyOptions): Promise<Uint8Array | null>;
-async function fetchyb<T>(url: Input, type?: "auto", options?: undefined): Promise<T | string | Uint8Array>;
-async function fetchyb<T>(url: Input, type?: "auto", options?: FetchyOptions & ThrowError): Promise<T | string | Uint8Array>;
-async function fetchyb<T>(url: Input, type?: "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null>;
-async function fetchyb<T>(url: Input, type: ParseType = "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null> {
+async function fetchyb(url: Input | null, type: "text", options?: undefined): Promise<string>;
+async function fetchyb(url: Input | null, type: "text", options: FetchyOptions & ThrowError): Promise<string>;
+async function fetchyb(url: Input | null, type: "text", options?: FetchyOptions): Promise<string | null>;
+async function fetchyb<T>(url: Input | null, type: "json", options?: undefined): Promise<T>;
+async function fetchyb<T>(url: Input | null, type: "json", options: FetchyOptions & ThrowError): Promise<T>;
+async function fetchyb<T>(url: Input | null, type: "json", options?: FetchyOptions): Promise<T | null>;
+async function fetchyb(url: Input | null, type: "bytes", options?: undefined): Promise<Uint8Array>;
+async function fetchyb(url: Input | null, type: "bytes", options: FetchyOptions & ThrowError): Promise<Uint8Array>;
+async function fetchyb(url: Input | null, type: "bytes", options?: FetchyOptions): Promise<Uint8Array | null>;
+async function fetchyb<T>(url: Input | null, type?: "auto", options?: undefined): Promise<T | string | Uint8Array>;
+async function fetchyb<T>(url: Input | null, type?: "auto", options?: FetchyOptions & ThrowError): Promise<T | string | Uint8Array>;
+async function fetchyb<T>(url: Input | null, type?: "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null>;
+async function fetchyb<T>(url: Input | null, type: ParseType = "auto", options?: FetchyOptions): Promise<T | string | Uint8Array | null> {
   const resp = await fetchy(url, options);
   if (!resp || !resp.ok) return null;
   const btype = resp.headers.get("Content-Type") ?? "";
@@ -230,13 +230,14 @@ async function fetchyb<T>(url: Input, type: ParseType = "auto", options?: Fetchy
  * ```
  */
 
-async function fetchy(url: Input, options?: undefined): Promise<Response>;
-async function fetchy(url: Input, options: FetchyOptions & ThrowError): Promise<Response>;
-async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | null>;
-async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | null> {
+async function fetchy(url: Input | null, options?: undefined): Promise<Response>;
+async function fetchy(url: Input | null, options: FetchyOptions & ThrowError): Promise<Response>;
+async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Response | null>;
+async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Response | null> {
   try {
+    if (!url) url = options?.url ?? new URL("");
     const opts = _getOptions(options);
-    const init = _getRequestInit(url, options, opts.abort);
+    const init = _getRequestInit(url, opts, options);
     const resp = await _fetchWithRetry(url, init, opts);
     if (!resp.ok && opts.onErrorStatus) throw await HTTPStatusError.fromResponse(resp);
     return resp;
@@ -297,9 +298,9 @@ function _isPlainObject(v: unknown): v is object {
  */
 function _throwError(prop: keyof ErrorOptions, options?: ErrorOptions | boolean): boolean {
   return Boolean(
-    (options === void 0 && DEFAULT[prop]) ||
+    (options === void 0 && _DEFAULT[prop]) ||
       (typeof options === "boolean" && options) ||
-      (typeof options === "object" && (options[prop] ?? DEFAULT[prop])),
+      (typeof options === "object" && (options[prop] ?? _DEFAULT[prop])),
   );
 }
 /**
@@ -326,8 +327,8 @@ function _getRetryOption(prop: keyof RetryOptions, off: number, options?: RetryO
 function _getRetryOption(prop: keyof RetryOptions, off: boolean, options?: RetryOptions | false): boolean;
 function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, options?: RetryOptions | false): number | boolean {
   if (_isBool(options)) return off;
-  if (options === void 0 || options[prop] === void 0) return DEFAULT[prop];
-  if (_isNumber(options[prop])) return _correctNumber(DEFAULT[prop] as number, options[prop], prop === "max");
+  if (options === void 0 || options[prop] === void 0) return _DEFAULT[prop];
+  if (_isNumber(options[prop])) return _correctNumber(_DEFAULT[prop] as number, options[prop], prop === "max");
   return options[prop];
 }
 /**
@@ -337,33 +338,32 @@ function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, option
  * @returns Normalized internal options.
  */
 function _getOptions(options?: FetchyOptions): Options {
-  const timeout = _correctNumber(DEFAULT.timeout, options?.timeout);
   return {
-    timeout,
-    jitter: _correctNumber(DEFAULT.jitter, options?.jitter),
+    timeout: _correctNumber(_DEFAULT.timeout, options?.timeout),
+    jitter: _correctNumber(_DEFAULT.jitter, options?.jitter),
     interval: _getRetryOption("interval", 0, options?.retry),
     maxInterval: _getRetryOption("maxInterval", 0, options?.retry),
     max: _getRetryOption("max", 0, options?.retry),
     byHeader: _getRetryOption("byHeader", false, options?.retry),
     onErrorStatus: _throwError("onErrorStatus", options?.throwError),
-    abort: options?.abort ?? (timeout ? new AbortController() : undefined),
-    userRedirect: options?.redirect ?? DEFAULT.userRedirect,
+    userRedirect: options?.redirect ?? _DEFAULT.userRedirect,
   };
 }
 /**
  * Converts FetchyOptions to standard RequestInit format.
  * @internal
+ * @param url - Original request URL.
+ * @param opts - Internal options.
  * @param options - User-provided options.
- * @param optsAbort - AbortController for timeout handling.
  * @returns Standard RequestInit object.
  */
-function _getRequestInit(url: Input, options?: FetchyOptions, optsAbort?: AbortController): RequestInit {
-  const { method, body, timeout, retry, bearerToken, throwError, jitter, abort, redirect, ...rest } = options ?? {};
+function _getRequestInit(url: Input, opts: Options, options?: FetchyOptions): RequestInit {
+  const { method, body, timeout, retry, bearerToken, throwError, jitter, redirect, signal, ...rest } = options ?? {};
   return {
     headers: _getHeaders(options),
     method: method ? method : url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
+    signal: _combineSignal(url, opts.timeout, options?.signal),
     ...(redirect && { redirect: redirect === "error" ? "manual" : redirect }),
-    ...(optsAbort && { signal: optsAbort.signal }),
     ...(body && { body: _getBody(body) }),
     ...rest,
   };
@@ -413,6 +413,21 @@ function _getContentType(body?: FetchyBody): string | undefined {
   if (_isJSONObject(body)) return "application/json";
   return "application/octet-stream";
 }
+/**
+ * Combine abort signals.
+ * @internal
+ * @param url - Original request URL.
+ * @param timeout - Request timeout in seconds.
+ * @param signal - AbortSignal in User-provided options.
+ * @returns Combined AbortSignal or undefined.
+ */
+function _combineSignal(url: Input, timeout: number, signal?: AbortSignal | null): AbortSignal | undefined {
+  const signals: AbortSignal[] = [];
+  if (url instanceof Request && url.signal) signals.push(url.signal);
+  if (signal) signals.push(signal);
+  if (timeout > 0) signals.push(AbortSignal.timeout(timeout * 1000 + 1));
+  return signals.length ? AbortSignal.any(signals) : undefined;
+}
 
 /**
  * Waits for specified seconds with optional randomization.
@@ -438,12 +453,13 @@ function _shouldRedirect(resp: Response): boolean {
  * Determines if retry should stop based on conditions and waits if continuing.
  * @internal
  * @param count - Current retry attempt number.
+ * @param init - Request initialization object.
  * @param opts - Internal options.
  * @param resp - Response from previous attempt.
  * @returns True if retry should stop.
  */
-async function _shouldNotRetry(count: number, opts: Options, resp?: Response): Promise<boolean> {
-  if (count >= opts.max - 1 || resp?.ok) return true;
+async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, resp?: Response): Promise<boolean> {
+  if (count >= opts.max - 1 || init.signal?.aborted || resp?.ok) return true;
   if (resp && _shouldRedirect(resp)) {
     if (opts.userRedirect === "manual") return true;
     if (opts.userRedirect === "error") {
@@ -498,6 +514,16 @@ function _handleRedirectResponse(url: Input, init: RequestInit, resp: Response):
   return url instanceof Request ? new Request(resp.url, url) : resp.url;
 }
 /**
+ * Clone input if required.
+ * @internal
+ * @param url - Original request URL.
+ * @param required - Switch to clone or not.
+ * @returns Cloned input for fetch.
+ */
+function _cloneInput(url: Input, required: boolean): Input {
+  return url instanceof Request && required ? url.clone() : url;
+}
+/**
  * Executes fetch with retry logic and exponential backoff.
  * @internal
  * @param url - Request URL.
@@ -506,19 +532,19 @@ function _handleRedirectResponse(url: Input, init: RequestInit, resp: Response):
  * @returns Response from successful request.
  */
 async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Promise<Response> {
-  if (!opts.max) return await _fetchWithTimeout(url, init, opts);
   for (let i = 0; i < opts.max; i++) {
     try {
-      const resp = await (opts.jitter ? _fetchWithJitter(url, init, opts) : _fetchWithTimeout(url, init, opts));
-      if (await _shouldNotRetry(i, opts, resp)) return resp;
+      const input = _cloneInput(url, i < opts.max - 1); // no clone if end of retry
+      const resp = await _fetchWithJitter(input, init, opts);
+      if (await _shouldNotRetry(i, init, opts, resp)) return resp;
       url = _handleRedirectResponse(url, init, resp);
       continue;
     } catch (e) {
-      if (await _shouldNotRetry(i, opts)) throw e;
+      if (await _shouldNotRetry(i, init, opts)) throw e;
       continue;
     }
   }
-  throw new Error("never reach");
+  return await _fetchWithJitter(url, init, opts);
 }
 /**
  * Executes fetch with initial jitter delay.
@@ -530,24 +556,5 @@ async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Pr
  */
 async function _fetchWithJitter(url: Input, init: RequestInit, opts: Options): Promise<Response> {
   await _wait(opts.jitter);
-  return await _fetchWithTimeout(url, init, opts);
-}
-/**
- * Executes fetch with timeout handling.
- * @internal
- * @param url - Request URL.
- * @param init - Request initialization object.
- * @param opts - Internal options.
- * @returns Response from request.
- */
-async function _fetchWithTimeout(url: Input, init: RequestInit, opts: Options): Promise<Response> {
-  const req = url instanceof Request ? url.clone() : url;
-  const id = opts.abort ? setTimeout(() => opts.abort?.abort("timeout"), opts.timeout * 1000) : 0;
-  try {
-    return await fetch(req, init);
-  } catch (e) {
-    throw e;
-  } finally {
-    clearTimeout(id);
-  }
+  return await fetch(url, init);
 }
