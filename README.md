@@ -258,7 +258,7 @@ const response = await fetchy("https://slow-api.example.com", {
 const data = await fetchyb("https://api.example.com/data", "json", {
   retry: {
     max: 5,           // Retry up to 5 times
-    interval: 2,      // Start with 2 seconds
+    interval: 2,      // First retry is fixed 1 second. From next, start with 2 seconds
     maxInterval: 60,  // Cap at 60 seconds
     byHeader: true    // Respect Retry-After header
   }

@@ -523,7 +523,7 @@ Deno.test("_getHeaders", async (t) => {
 
 Deno.test("_getRequestInit", async (t) => {
   await t.step("default GET request", () => {
-    const init = _getRequestInit(undefined, undefined);
+    const init = _getRequestInit("", undefined, undefined);
     assertEquals(init.method, "GET");
     assertEquals(init.headers, {
       "Accept": "application/json, text/plain",
@@ -533,30 +533,44 @@ Deno.test("_getRequestInit", async (t) => {
   });
 
   await t.step("POST request with body", () => {
-    const init = _getRequestInit({ body: "text" }, undefined);
+    const init = _getRequestInit("", { body: "text" }, undefined);
+    assertEquals(init.method, "POST");
+    assertEquals(init.body, "text");
+  });
+
+  await t.step("Method of Request obj is respected", () => {
+    const req = new Request("https://example.com", { method: "PUT" });
+    const init = _getRequestInit(req, { body: "text" }, undefined);
+    assertEquals(init.method, "PUT");
+    assertEquals(init.body, "text");
+  });
+
+  await t.step("Method of option is most respected", () => {
+    const req = new Request("https://example.com", { method: "PUT" });
+    const init = _getRequestInit(req, { method: "POST", body: "text" }, undefined);
     assertEquals(init.method, "POST");
     assertEquals(init.body, "text");
   });
 
   await t.step("includes abort signal", () => {
     const abort = new AbortController();
-    const init = _getRequestInit(undefined, abort);
+    const init = _getRequestInit("", undefined, abort);
     assertStrictEquals(init.signal, abort.signal);
   });
 
   await t.step("includes additional options", () => {
-    const init = _getRequestInit({ mode: "cors", credentials: "include" }, undefined);
+    const init = _getRequestInit("", { mode: "cors", credentials: "include" }, undefined);
     assertEquals(init.mode, "cors");
     assertEquals(init.credentials, "include");
   });
 
   await t.step("body is processed correctly", () => {
-    const init = _getRequestInit({ body: { key: "value" } }, undefined);
+    const init = _getRequestInit("", { body: { key: "value" } }, undefined);
     assertEquals(init.body, '{"key":"value"}');
   });
 
   await t.step("converts redirect error to manual", () => {
-    const init = _getRequestInit({ redirect: "error" }, undefined);
+    const init = _getRequestInit("", { redirect: "error" }, undefined);
     assertEquals(init.redirect, "manual");
   });
 });

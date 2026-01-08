@@ -358,10 +358,10 @@ function _getOptions(options?: FetchyOptions): Options {
  * @returns Standard RequestInit object.
  */
 function _getRequestInit(url: Input, options?: FetchyOptions, optsAbort?: AbortController): RequestInit {
-  const { body, timeout, retry, bearerToken, throwError, jitter, abort, redirect, ...rest } = options ?? {};
+  const { method, body, timeout, retry, bearerToken, throwError, jitter, abort, redirect, ...rest } = options ?? {};
   return {
-    method: url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
     headers: _getHeaders(options),
+    method: method ? method : url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
     ...(redirect && { redirect: redirect === "error" ? "manual" : redirect }),
     ...(optsAbort && { signal: optsAbort.signal }),
     ...(body && { body: _getBody(body) }),
@@ -443,7 +443,7 @@ function _shouldRedirect(resp: Response): boolean {
  * @returns True if retry should stop.
  */
 async function _shouldNotRetry(count: number, opts: Options, resp?: Response): Promise<boolean> {
-  if (count >= opts.max || resp?.ok) return true;
+  if (count >= opts.max - 1 || resp?.ok) return true;
   if (resp && _shouldRedirect(resp)) {
     if (opts.userRedirect === "manual") return true;
     if (opts.userRedirect === "error") {
@@ -507,7 +507,7 @@ function _handleRedirectResponse(url: Input, init: RequestInit, resp: Response):
  */
 async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Promise<Response> {
   if (!opts.max) return await _fetchWithTimeout(url, init, opts);
-  for (let i = 1; i <= opts.max; i++) {
+  for (let i = 0; i < opts.max; i++) {
     try {
       const resp = await (opts.jitter ? _fetchWithJitter(url, init, opts) : _fetchWithTimeout(url, init, opts));
       if (await _shouldNotRetry(i, opts, resp)) return resp;
