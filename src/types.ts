@@ -37,11 +37,11 @@ export interface FetchyOptions extends Omit<RequestInit, "body"> {
   /** Retry configuration. Set to false to disable retry functionality. */
   retry?: RetryOptions | false;
   /** Bearer token for Authorization header. Automatically adds "Bearer " prefix. */
-  bearerToken?: string;
+  bearer?: string;
   /** Error throwing behavior configuration. Set to true to throw all errors. */
-  throwError?: ErrorOptions | boolean;
+  onError?: ErrorOptions | boolean;
   /** Initial jitter delay in seconds before sending the request. Adds randomness to prevent thundering herd. */
-  jitter?: number;
+  delay?: number;
 }
 
 /**
@@ -64,9 +64,9 @@ export interface RetryOptions {
   /** Maximum interval in seconds between retries. Caps the exponential backoff. Default is 30 seconds. */
   maxInterval?: number;
   /** Maximum number of retry attempts. Default is 3. */
-  max?: number;
+  maxAttempts?: number;
   /** Whether to respect Retry-After header from response. Default is true. */
-  byHeader?: boolean;
+  retryAfter?: boolean;
 }
 
 /**
@@ -74,8 +74,8 @@ export interface RetryOptions {
  * Allows fine-grained control over which errors should be thrown vs. returned as null.
  */
 export interface ErrorOptions {
-  /** Whether to throw errors during response parsing (e.g., JSON parsing errors). Default is true. */
-  onError?: boolean;
-  /** Whether to throw HTTPStatusError for non-OK status codes (4xx, 5xx). Default is false. */
-  onErrorStatus?: boolean;
+  /** Whether to throw native errors (network errors, parsing errors, etc.). If false, returns null instead. Default is true. */
+  onNative?: boolean;
+  /** Whether to throw HTTPStatusError for non-OK status codes (4xx, 5xx, ...). Default is false. */
+  onStatus?: boolean;
 }

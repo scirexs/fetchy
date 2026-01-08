@@ -242,28 +242,28 @@ Deno.test("_correctNumber", async (t) => {
 });
 
 Deno.test("_throwError", async (t) => {
-  await t.step("returns default when throwError is undefined", () => {
-    assertEquals(_throwError("onError", undefined), _DEFAULT.onError);
-    assertEquals(_throwError("onErrorStatus", undefined), _DEFAULT.onErrorStatus);
+  await t.step("returns default when onError is undefined", () => {
+    assertEquals(_throwError("onNative", undefined), _DEFAULT.onNative);
+    assertEquals(_throwError("onStatus", undefined), _DEFAULT.onStatus);
   });
 
-  await t.step("returns throwError boolean value", () => {
-    assertEquals(_throwError("onError", true), true);
-    assertEquals(_throwError("onError", false), false);
-    assertEquals(_throwError("onErrorStatus", true), true);
-    assertEquals(_throwError("onErrorStatus", false), false);
+  await t.step("returns onError boolean value", () => {
+    assertEquals(_throwError("onNative", true), true);
+    assertEquals(_throwError("onNative", false), false);
+    assertEquals(_throwError("onStatus", true), true);
+    assertEquals(_throwError("onStatus", false), false);
   });
 
-  await t.step("returns throwError object property", () => {
-    assertEquals(_throwError("onError", { onError: true }), true);
-    assertEquals(_throwError("onError", { onError: false }), false);
-    assertEquals(_throwError("onErrorStatus", { onErrorStatus: true }), true);
-    assertEquals(_throwError("onErrorStatus", { onErrorStatus: false }), false);
+  await t.step("returns onError object property", () => {
+    assertEquals(_throwError("onNative", { onNative: true }), true);
+    assertEquals(_throwError("onNative", { onNative: false }), false);
+    assertEquals(_throwError("onStatus", { onStatus: true }), true);
+    assertEquals(_throwError("onStatus", { onStatus: false }), false);
   });
 
   await t.step("returns default when property is undefined in object", () => {
-    assertEquals(_throwError("onError", {}), _DEFAULT.onError);
-    assertEquals(_throwError("onErrorStatus", {}), _DEFAULT.onErrorStatus);
+    assertEquals(_throwError("onNative", {}), _DEFAULT.onNative);
+    assertEquals(_throwError("onStatus", {}), _DEFAULT.onStatus);
   });
 });
 
@@ -271,20 +271,20 @@ Deno.test("_getRetryOption", async (t) => {
   await t.step("returns default value when options is undefined", () => {
     assertEquals(_getRetryOption("interval", 0, undefined), _DEFAULT.interval);
     assertEquals(_getRetryOption("maxInterval", 0, undefined), _DEFAULT.maxInterval);
-    assertEquals(_getRetryOption("max", 0, undefined), _DEFAULT.max);
-    assertEquals(_getRetryOption("byHeader", false, undefined), _DEFAULT.byHeader);
+    assertEquals(_getRetryOption("maxAttempts", 0, undefined), _DEFAULT.maxAttempts);
+    assertEquals(_getRetryOption("retryAfter", false, undefined), _DEFAULT.retryAfter);
   });
 
   await t.step("returns off value when options is false", () => {
     assertEquals(_getRetryOption("interval", 0, false), 0);
     assertEquals(_getRetryOption("maxInterval", 99, false), 99);
-    assertEquals(_getRetryOption("byHeader", false, false), false);
+    assertEquals(_getRetryOption("retryAfter", false, false), false);
   });
 
   await t.step("returns provided value when valid", () => {
     assertEquals(_getRetryOption("interval", 0, { interval: 5 }), 5);
-    assertEquals(_getRetryOption("max", 0, { max: 10 }), 10);
-    assertEquals(_getRetryOption("byHeader", false, { byHeader: false }), false);
+    assertEquals(_getRetryOption("maxAttempts", 0, { maxAttempts: 10 }), 10);
+    assertEquals(_getRetryOption("retryAfter", false, { retryAfter: false }), false);
   });
 
   await t.step("returns default when property is undefined", () => {
@@ -294,7 +294,7 @@ Deno.test("_getRetryOption", async (t) => {
 
   await t.step("corrects negative numbers", () => {
     assertEquals(_getRetryOption("interval", 0, { interval: -5 }), _DEFAULT.interval);
-    assertEquals(_getRetryOption("max", 0, { max: -1 }), _DEFAULT.max);
+    assertEquals(_getRetryOption("maxAttempts", 0, { maxAttempts: -1 }), _DEFAULT.maxAttempts);
   });
 });
 
@@ -302,13 +302,13 @@ Deno.test("_getOptions", async (t) => {
   await t.step("returns default options when no options provided", () => {
     const opts = _getOptions(undefined);
     assertEquals(opts.timeout, _DEFAULT.timeout);
-    assertEquals(opts.jitter, _DEFAULT.jitter);
+    assertEquals(opts.delay, _DEFAULT.delay);
     assertEquals(opts.interval, _DEFAULT.interval);
     assertEquals(opts.maxInterval, _DEFAULT.maxInterval);
-    assertEquals(opts.max, _DEFAULT.max);
-    assertEquals(opts.byHeader, _DEFAULT.byHeader);
-    assertEquals(opts.onErrorStatus, _DEFAULT.onErrorStatus);
-    assertEquals(opts.userRedirect, _DEFAULT.userRedirect);
+    assertEquals(opts.maxAttempts, _DEFAULT.maxAttempts);
+    assertEquals(opts.retryAfter, _DEFAULT.retryAfter);
+    assertEquals(opts.onStatus, _DEFAULT.onStatus);
+    assertEquals(opts.redirect, _DEFAULT.redirect);
   });
 
   await t.step("overrides timeout", () => {
@@ -316,32 +316,32 @@ Deno.test("_getOptions", async (t) => {
     assertEquals(opts.timeout, 30);
   });
 
-  await t.step("overrides jitter", () => {
-    const opts = _getOptions({ jitter: 5 });
-    assertEquals(opts.jitter, 5);
+  await t.step("overrides delay", () => {
+    const opts = _getOptions({ delay: 5 });
+    assertEquals(opts.delay, 5);
   });
 
   await t.step("overrides retry options", () => {
     const opts = _getOptions({
-      retry: { interval: 5, maxInterval: 60, max: 10, byHeader: false },
+      retry: { interval: 5, maxInterval: 60, maxAttempts: 10, retryAfter: false },
     });
     assertEquals(opts.interval, 5);
     assertEquals(opts.maxInterval, 60);
-    assertEquals(opts.max, 10);
-    assertEquals(opts.byHeader, false);
+    assertEquals(opts.maxAttempts, 10);
+    assertEquals(opts.retryAfter, false);
   });
 
   await t.step("disables retry when retry is false", () => {
     const opts = _getOptions({ retry: false });
     assertEquals(opts.interval, 0);
     assertEquals(opts.maxInterval, 0);
-    assertEquals(opts.max, 0);
-    assertEquals(opts.byHeader, false);
+    assertEquals(opts.maxAttempts, 0);
+    assertEquals(opts.retryAfter, false);
   });
 
-  await t.step("enables onErrorStatus with throwError option", () => {
-    const opts = _getOptions({ throwError: { onErrorStatus: true } });
-    assertEquals(opts.onErrorStatus, true);
+  await t.step("enables onStatus with onError option", () => {
+    const opts = _getOptions({ onError: { onStatus: true } });
+    assertEquals(opts.onStatus, true);
   });
 });
 
@@ -463,8 +463,8 @@ Deno.test("_getHeaders", async (t) => {
     });
   });
 
-  await t.step("adds Authorization for bearerToken", () => {
-    const headers = _getHeaders({ bearerToken: "token123" });
+  await t.step("adds Authorization for bearer", () => {
+    const headers = _getHeaders({ bearer: "token123" });
     assertEquals(headers, {
       "Accept": defaultAccept,
       "Authorization": "Bearer token123",
@@ -493,7 +493,7 @@ Deno.test("_getHeaders", async (t) => {
   await t.step("all options combined", () => {
     const headers = _getHeaders({
       body: { key: "value" },
-      bearerToken: "token123",
+      bearer: "token123",
       headers: { "X-Custom": "value" },
     });
     assertEquals(headers, {
@@ -725,7 +725,7 @@ Deno.test("_wait", async (t) => {
   await t.step("wait for random positive seconds", async () => {
     for (let i = 0; i < 10; i++) {
       const start = Date.now();
-      await _wait(0.05); // 50ms max
+      await _wait(0.05); // 50ms maxAttempts
       const elapsed = Date.now() - start;
       assertEquals(elapsed >= 0, true);
       assertEquals(elapsed <= 55, true); // Should be less than 100ms
@@ -735,7 +735,7 @@ Deno.test("_wait", async (t) => {
   await t.step("wait for exact positive seconds", async () => {
     for (let i = 0; i < 10; i++) {
       const start = Date.now();
-      await _wait(0.05, false); // 50ms max
+      await _wait(0.05, false); // 50ms maxAttempts
       const elapsed = Date.now() - start;
       assertEquals(elapsed >= 50, true);
       assertEquals(elapsed <= 55, true); // Should be less than 100ms
@@ -854,18 +854,18 @@ Deno.test("_getNextInterval", async (t) => {
     const opts = {
       ..._DEFAULT,
       interval: 3,
-      max: 5,
-      byHeader: false,
+      maxAttempts: 5,
+      retryAfter: false,
     };
     const interval = _getNextInterval(3, opts);
     assertEquals(interval === 27, true);
   });
 
-  await t.step("uses Retry-After header when byHeader is true", () => {
+  await t.step("uses Retry-After header when retryAfter is true", () => {
     const opts = {
       ..._DEFAULT,
       interval: 3,
-      max: 5,
+      maxAttempts: 5,
     };
     const resp = new Response("", {
       status: 429,
@@ -875,12 +875,12 @@ Deno.test("_getNextInterval", async (t) => {
     assertEquals(interval === 20, true);
   });
 
-  await t.step("uses interval if Retry-After header is smaller than interval when byHeader is true", () => {
+  await t.step("uses interval if Retry-After header is smaller than interval when retryAfter is true", () => {
     const opts = {
       ..._DEFAULT,
       interval: 3,
       maxInterval: 30,
-      max: 5,
+      maxAttempts: 5,
     };
     const resp = new Response("", {
       status: 429,
@@ -890,12 +890,12 @@ Deno.test("_getNextInterval", async (t) => {
     assertEquals(interval === 3, true);
   });
 
-  await t.step("ignores Retry-After header when byHeader is false", () => {
+  await t.step("ignores Retry-After header when retryAfter is false", () => {
     const opts = {
       ..._DEFAULT,
       interval: 3,
-      max: 5,
-      byHeader: false,
+      maxAttempts: 5,
+      retryAfter: false,
     };
     const resp = new Response("", {
       status: 429,
@@ -907,7 +907,7 @@ Deno.test("_getNextInterval", async (t) => {
 });
 
 Deno.test("_shouldNotRetry", async (t) => {
-  await t.step("returns true when count exceeds max", async () => {
+  await t.step("returns true when count exceeds maxAttempts", async () => {
     const opts = {
       ..._DEFAULT,
       interval: 1,
@@ -920,11 +920,11 @@ Deno.test("_shouldNotRetry", async (t) => {
     const opts = {
       ..._DEFAULT,
       interval: 1.2,
-      max: 5,
-      byHeader: false,
+      maxAttempts: 5,
+      retryAfter: false,
     };
     const start = Date.now();
-    const result = await _shouldNotRetry(2, {}, opts); // 50ms max
+    const result = await _shouldNotRetry(2, {}, opts); // 50ms maxAttempts
     const elapsed = Date.now() - start;
     assertEquals(result, false);
     assertEquals(elapsed > 1400, true);
@@ -943,19 +943,19 @@ Deno.test("_shouldNotRetry", async (t) => {
     assertEquals(await _shouldNotRetry(1, init, _DEFAULT), true);
   });
 
-  await t.step("returns true when redirect status and userRedirect is manual", async () => {
+  await t.step("returns true when redirect status and redirect is manual", async () => {
     const opts = {
       ..._DEFAULT,
-      userRedirect: "manual" as const,
+      redirect: "manual" as const,
     };
     const resp = new Response("", { status: 301 });
     assertEquals(await _shouldNotRetry(1, {}, opts, resp), true);
   });
 
-  await t.step("throw RedirectError when redirect status and userRedirect is error", async () => {
+  await t.step("throw RedirectError when redirect status and redirect is error", async () => {
     const opts = {
       ..._DEFAULT,
-      userRedirect: "error" as const,
+      redirect: "error" as const,
     };
     const resp = new Response("", { status: 301 });
     await assertRejects(() => _shouldNotRetry(1, {}, opts, resp), RedirectError);
@@ -966,7 +966,7 @@ Deno.test("_shouldNotRetry", async (t) => {
       ..._DEFAULT,
       interval: 5,
       maxInterval: 10,
-      max: 5,
+      maxAttempts: 5,
     };
     const resp = new Response("", { status: 500 });
     assertEquals(await _shouldNotRetry(3, {}, opts, resp), true);
@@ -977,7 +977,7 @@ Deno.test("_shouldNotRetry", async (t) => {
       ..._DEFAULT,
       interval: 1,
       maxInterval: 5,
-      max: 5,
+      maxAttempts: 5,
     };
     const resp = new Response("", {
       status: 429,
@@ -991,7 +991,7 @@ Deno.test("_shouldNotRetry", async (t) => {
       ..._DEFAULT,
       interval: 1,
       maxInterval: 5,
-      max: 5,
+      maxAttempts: 5,
     };
     const resp = new Response("", {
       status: 429,
@@ -1101,7 +1101,7 @@ Deno.test("_cloneInput", async (t) => {
 });
 
 Deno.test("_fetchWithJitter", async (t) => {
-  await t.step("adds jitter delay before fetch", async () => {
+  await t.step("adds delay delay before fetch", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1111,7 +1111,7 @@ Deno.test("_fetchWithJitter", async (t) => {
     try {
       const opts = {
         ..._DEFAULT,
-        jitter: 0.05, // Max 50ms
+        delay: 0.05, // Max 50ms
         interval: 1,
         abort: new AbortController(),
       };
@@ -1125,7 +1125,7 @@ Deno.test("_fetchWithJitter", async (t) => {
     }
   });
 
-  await t.step("jitter of 0 has no delay", async () => {
+  await t.step("delay of 0 has no delay", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1182,7 +1182,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 0.01,
-        byHeader: false,
+        retryAfter: false,
         abort: new AbortController(),
       };
       const resp = await _fetchWithRetry("https://example.com", {}, opts);
@@ -1192,7 +1192,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       mockFetch.restore();
     }
   });
-  await t.step("throws after max retries", async () => {
+  await t.step("throws after maxAttempts retries", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1202,7 +1202,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 0.01,
-        byHeader: false,
+        retryAfter: false,
         abort: new AbortController(),
       };
       await assertRejects(
@@ -1215,7 +1215,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       mockFetch.restore();
     }
   });
-  await t.step("no retry when max is 0", async () => {
+  await t.step("no retry when maxAttempts is 0", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1225,8 +1225,8 @@ Deno.test("_fetchWithRetry", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 0.01,
-        max: 0,
-        byHeader: false,
+        maxAttempts: 0,
+        retryAfter: false,
         abort: new AbortController(),
       };
       const resp = await _fetchWithRetry("https://example.com", {}, opts);
@@ -1236,7 +1236,7 @@ Deno.test("_fetchWithRetry", async (t) => {
       mockFetch.restore();
     }
   });
-  await t.step("uses jitter when configured", async () => {
+  await t.step("uses delay when configured", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1245,10 +1245,10 @@ Deno.test("_fetchWithRetry", async (t) => {
     try {
       const opts = {
         ..._DEFAULT,
-        jitter: 0.01,
+        delay: 0.01,
         interval: 0.01,
-        max: 1,
-        byHeader: false,
+        maxAttempts: 1,
+        retryAfter: false,
         abort: new AbortController(),
       };
       const start = Date.now();
@@ -1267,8 +1267,8 @@ Deno.test("_fetchWithRetry", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 0.01,
-        byHeader: false,
-        userRedirect: "error" as const,
+        retryAfter: false,
+        redirect: "error" as const,
         abort: new AbortController(),
       };
       await assertRejects(
@@ -1358,7 +1358,7 @@ Deno.test("fetchy", async (t) => {
     );
     try {
       await assertRejects(
-        () => fetchy("https://example.com", { throwError: { onErrorStatus: true }, retry: false }),
+        () => fetchy("https://example.com", { onError: { onStatus: true }, retry: false }),
         HTTPStatusError,
         "404 Not Found: Not Found",
       );
@@ -1366,20 +1366,20 @@ Deno.test("fetchy", async (t) => {
       mockFetch.restore();
     }
   });
-  await t.step("returns null on error when throwError is false", async () => {
+  await t.step("returns null on error when onError is false", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
       () => Promise.reject(new Error("Network error")),
     );
     try {
-      const resp = await fetchy("https://example.com", { throwError: false, retry: false });
+      const resp = await fetchy("https://example.com", { onError: false, retry: false });
       assertEquals(resp, null);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("throws error when throwError is true", async () => {
+  await t.step("throws error when onError is true", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1387,7 +1387,7 @@ Deno.test("fetchy", async (t) => {
     );
     try {
       await assertRejects(
-        () => fetchy("https://example.com", { throwError: true, retry: false }),
+        () => fetchy("https://example.com", { onError: true, retry: false }),
         Error,
         "Network error",
       );
@@ -1442,7 +1442,7 @@ Deno.test("fetchy", async (t) => {
       },
     );
     try {
-      const resp = await fetchy("https://example.com", { timeout: 0.1, retry: false, throwError: false });
+      const resp = await fetchy("https://example.com", { timeout: 0.1, retry: false, onError: false });
       assertEquals(resp, null);
     } finally {
       mockFetch.restore();
@@ -1455,7 +1455,7 @@ Deno.test("fetchy", async (t) => {
       () => Promise.resolve(new Response("ok", { status: 200 })),
     );
     try {
-      await fetchy("https://example.com", { bearerToken: "secret" });
+      await fetchy("https://example.com", { bearer: "secret" });
       assertSpyCall(mockFetch, 0, {
         args: [
           "https://example.com",
@@ -1614,13 +1614,13 @@ Deno.test("fetchyb", async (t) => {
         ),
     );
     try {
-      const result = await fetchyb("https://example.com", "json", { throwError: false });
+      const result = await fetchyb("https://example.com", "json", { onError: false });
       assertEquals(result, null);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("throws on parse error when throwError is true", async () => {
+  await t.step("throws on parse error when onError is true", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
@@ -1634,7 +1634,7 @@ Deno.test("fetchyb", async (t) => {
     );
     try {
       await assertRejects(
-        () => fetchyb("https://example.com", "json", { throwError: true }),
+        () => fetchyb("https://example.com", "json", { onError: true }),
         SyntaxError,
       );
     } finally {
@@ -1649,7 +1649,7 @@ Deno.test("fetchyb", async (t) => {
     );
     try {
       const result = await fetchyb("https://example.com", "text", {
-        throwError: false,
+        onError: false,
         retry: false,
       });
       assertEquals(result, null);

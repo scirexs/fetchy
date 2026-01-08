@@ -38,14 +38,14 @@ import type { ErrorOptions, FetchyBody, FetchyOptions, RetryOptions } from "./ty
  */
 const _DEFAULT: Options = {
   timeout: 15,
-  jitter: 0,
+  delay: 0,
   interval: 3,
   maxInterval: 30,
-  max: 3,
-  byHeader: true,
-  onError: true,
-  onErrorStatus: false,
-  userRedirect: "follow",
+  maxAttempts: 3,
+  retryAfter: true,
+  onNative: true,
+  onStatus: false,
+  redirect: "follow",
 } as const;
 
 /*=============== Internal Types ================*/
@@ -65,14 +65,14 @@ type ParseType = "text" | "json" | "bytes" | "auto";
  */
 interface Options {
   timeout: number;
-  jitter: number;
+  delay: number;
   interval: number;
   maxInterval: number;
-  max: number;
-  byHeader: boolean;
-  onError?: boolean;
-  onErrorStatus: boolean;
-  userRedirect: "follow" | "error" | "manual";
+  maxAttempts: number;
+  retryAfter: boolean;
+  onNative?: boolean;
+  onStatus: boolean;
+  redirect: "follow" | "error" | "manual";
 }
 /**
  * Infer helper type for response type overload.
@@ -193,7 +193,7 @@ async function fetchyb<T>(url: Input | null, type: ParseType = "auto", options?:
     if (type === "json" || (type === "auto" && btype === "application/json")) return await resp.json() as T;
     return await resp.bytes();
   } catch (e) {
-    if (_throwError("onError", options?.throwError)) throw e;
+    if (_throwError("onNative", options?.onError)) throw e;
     return null;
   }
 }
@@ -239,10 +239,10 @@ async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Respo
     const opts = _getOptions(options);
     const init = _getRequestInit(url, opts, options);
     const resp = await _fetchWithRetry(url, init, opts);
-    if (!resp.ok && opts.onErrorStatus) throw await HTTPStatusError.fromResponse(resp);
+    if (!resp.ok && opts.onStatus) throw await HTTPStatusError.fromResponse(resp);
     return resp;
   } catch (e) {
-    if (_throwError("onError", options?.throwError)) throw e;
+    if (_throwError("onNative", options?.onError)) throw e;
     return null;
   }
 }
@@ -328,7 +328,7 @@ function _getRetryOption(prop: keyof RetryOptions, off: boolean, options?: Retry
 function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, options?: RetryOptions | false): number | boolean {
   if (_isBool(options)) return off;
   if (options === void 0 || options[prop] === void 0) return _DEFAULT[prop];
-  if (_isNumber(options[prop])) return _correctNumber(_DEFAULT[prop] as number, options[prop], prop === "max");
+  if (_isNumber(options[prop])) return _correctNumber(_DEFAULT[prop] as number, options[prop], prop === "maxAttempts");
   return options[prop];
 }
 /**
@@ -340,13 +340,13 @@ function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, option
 function _getOptions(options?: FetchyOptions): Options {
   return {
     timeout: _correctNumber(_DEFAULT.timeout, options?.timeout),
-    jitter: _correctNumber(_DEFAULT.jitter, options?.jitter),
+    delay: _correctNumber(_DEFAULT.delay, options?.delay),
     interval: _getRetryOption("interval", 0, options?.retry),
     maxInterval: _getRetryOption("maxInterval", 0, options?.retry),
-    max: _getRetryOption("max", 0, options?.retry),
-    byHeader: _getRetryOption("byHeader", false, options?.retry),
-    onErrorStatus: _throwError("onErrorStatus", options?.throwError),
-    userRedirect: options?.redirect ?? _DEFAULT.userRedirect,
+    maxAttempts: _getRetryOption("maxAttempts", 0, options?.retry),
+    retryAfter: _getRetryOption("retryAfter", false, options?.retry),
+    onStatus: _throwError("onStatus", options?.onError),
+    redirect: options?.redirect ?? _DEFAULT.redirect,
   };
 }
 /**
@@ -358,7 +358,7 @@ function _getOptions(options?: FetchyOptions): Options {
  * @returns Standard RequestInit object.
  */
 function _getRequestInit(url: Input, opts: Options, options?: FetchyOptions): RequestInit {
-  const { method, body, timeout, retry, bearerToken, throwError, jitter, redirect, signal, ...rest } = options ?? {};
+  const { method, body, timeout, retry, bearer, onError, delay, redirect, signal, ...rest } = options ?? {};
   return {
     headers: _getHeaders(options),
     method: method ? method : url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
@@ -397,7 +397,7 @@ function _getHeaders(options?: FetchyOptions): HeadersInit {
   return {
     "Accept": "application/json, text/plain",
     ...(type && { "Content-Type": type }),
-    ...(options?.bearerToken && { "Authorization": `Bearer ${options.bearerToken}` }),
+    ...(options?.bearer && { "Authorization": `Bearer ${options.bearer}` }),
     ...options?.headers,
   };
 }
@@ -459,11 +459,11 @@ function _shouldRedirect(resp: Response): boolean {
  * @returns True if retry should stop.
  */
 async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, resp?: Response): Promise<boolean> {
-  if (count >= opts.max - 1 || init.signal?.aborted || resp?.ok) return true;
+  if (count >= opts.maxAttempts - 1 || init.signal?.aborted || resp?.ok) return true;
   if (resp && _shouldRedirect(resp)) {
-    if (opts.userRedirect === "manual") return true;
-    if (opts.userRedirect === "error") {
-      opts.max = 0;
+    if (opts.redirect === "manual") return true;
+    if (opts.redirect === "error") {
+      opts.maxAttempts = 0;
       throw RedirectError.fromResponse(resp);
     }
   }
@@ -482,7 +482,7 @@ async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, 
  * @returns Next retry interval in seconds.
  */
 function _getNextInterval(count: number, opts: Options, resp?: Response): number {
-  return opts.byHeader && resp
+  return opts.retryAfter && resp
     ? Math.max(_parseRetryAfter(resp.headers.get("Retry-After")?.trim() ?? ""), opts.interval)
     : Math.min(Math.pow(Math.max(1, opts.interval), count), opts.maxInterval);
 }
@@ -532,9 +532,9 @@ function _cloneInput(url: Input, required: boolean): Input {
  * @returns Response from successful request.
  */
 async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Promise<Response> {
-  for (let i = 0; i < opts.max; i++) {
+  for (let i = 0; i < opts.maxAttempts; i++) {
     try {
-      const input = _cloneInput(url, i < opts.max - 1); // no clone if end of retry
+      const input = _cloneInput(url, i < opts.maxAttempts - 1); // no clone if end of retry
       const resp = await _fetchWithJitter(input, init, opts);
       if (await _shouldNotRetry(i, init, opts, resp)) return resp;
       url = _handleRedirectResponse(url, init, resp);
@@ -555,6 +555,6 @@ async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Pr
  * @returns Response from request.
  */
 async function _fetchWithJitter(url: Input, init: RequestInit, opts: Options): Promise<Response> {
-  await _wait(opts.jitter);
+  await _wait(opts.delay);
   return await fetch(url, init);
 }

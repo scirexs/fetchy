@@ -15,9 +15,10 @@ A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handli
 - **Type-Safe** - Full TypeScript support with generic type inference
 - **Bearer Token Helper** - Built-in Authorization header management
 - **Jitter Support** - Prevent thundering herd with randomized delays
-- **Auto Body Parsing** - Automatic JSON serialization and Content-Type detection
+- **Automatic Body Parsing** - Automatic JSON serialization and Content-Type detection
 
 ## Installation
+
 ```bash
 # npm
 npm install @scirexs/fetchy
@@ -27,6 +28,7 @@ deno add jsr:@scirexs/fetchy
 ```
 
 ## Quick Start
+
 ```ts
 import { fetchy, fetchyb } from "@scirexs/fetchy";
 
@@ -52,20 +54,23 @@ console.log(user?.name);
 Performs an HTTP request and returns the raw Response object.
 
 #### Parameters
+
 - `url`: `string | URL | Request | null` - The request URL
 - `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
-`Promise<Response>`; If configure `throwError.onError`, `Promise<Response | null>`
+
+`Promise<Response>`; If `onError.onNative` is configured as `false`, returns `Promise<Response | null>`
 
 #### Example
+
 ```ts
 const response = await fetchy("https://api.example.com/data", {
   method: "POST",
   body: { key: "value" },
   timeout: 10,
-  retry: { max: 3, interval: 2 },
-  bearerToken: "your-token-here"
+  retry: { maxAttempts: 3, interval: 2 },
+  bearer: "your-token-here"
 });
 
 if (response?.ok) {
@@ -78,14 +83,17 @@ if (response?.ok) {
 Performs an HTTP request and automatically parses the response body.
 
 #### Parameters
+
 - `url`: `string | URL | Request | null` - The request URL
 - `type`: `"text" | "json" | "bytes" | "auto"` (default: `"auto"`) - Response parsing type
 - `options`: `FetchyOptions` (optional) - Configuration options
 
 #### Returns
-`Promise<T | string | Uint8Array>`; If configure `throwError.onError`, `Promise<T | string | Uint8Array | null>`
+
+`Promise<T | string | Uint8Array>`; If `onError.onNative` is configured as `false`, returns `Promise<T | string | Uint8Array | null>`
 
 #### Example
+
 ```ts
 // Automatic type detection from Content-Type header
 const data = await fetchyb("https://api.example.com/data");
@@ -105,7 +113,7 @@ const html = await fetchyb("https://example.com", "text");
 const image = await fetchyb("https://example.com/image.png", "bytes");
 ```
 
-## Configurations
+## Configuration
 
 ### API Options
 
@@ -122,30 +130,30 @@ interface FetchyOptions extends RequestInit {
   body?: JSONValue | FormData | URLSearchParams | Blob | ArrayBuffer | string;
   
   // Timeout in seconds (default: 15)
-  timeout?: number;  // If you don't want to set it, set it to 0.
+  timeout?: number;  // Set to 0 to disable timeout
   
   // Retry configuration
   retry?: {
-    max?: number;           // Max retry attempts (default: 3)
-    interval?: number;      // Base interval in seconds (default: 3)
-    maxInterval?: number;   // Max interval cap (default: 30)
-    byHeader?: boolean;     // Respect Retry-After header (default: true)
+    maxAttempts?: number;  // Maximum retry attempts (default: 3)
+    interval?: number;     // Base interval in seconds (default: 3)
+    maxInterval?: number;  // Maximum interval cap in seconds (default: 30)
+    retryAfter?: boolean;  // Respect Retry-After header (default: true)
   } | false;  // Set to false to disable retry
   
-  // Bearer token (auto-adds "Bearer " prefix)
-  bearerToken?: string;
+  // Bearer token (automatically adds "Bearer " prefix)
+  bearer?: string;
   
   // Error throwing behavior
-  throwError?: {
-    onError?: boolean;        // Throw on native errors (default: true)
-    onErrorStatus?: boolean;  // Throw on 4xx/5xx status (default: false)
-  } | boolean;  // Set to true to throw all errors
+  onError?: {
+    onNative?: boolean;  // Throw on native errors (default: true)
+    onStatus?: boolean;  // Throw on 4xx/5xx status (default: false)
+  } | boolean;  // Set to true to throw on all errors
   
   // Initial jitter delay in seconds
-  jitter?: number;
+  delay?: number;
 
-  // URL for fetch
-  url?: string | URL;  // If you want to use FetchyOptions instead of Request.
+  // URL for fetch (allows reusing FetchyOptions as preset configuration)
+  url?: string | URL;
 }
 ```
 
@@ -153,65 +161,65 @@ interface FetchyOptions extends RequestInit {
 
 ```ts
 {
-  timeout: 15,           // 15 seconds
-  jitter: 0,             // No jitter
+  timeout: 15,        // 15 seconds
+  delay: 0,           // No jitter delay
   retry: {
-    max: 3,              // 3 retry attempts
-    interval: 3,         // 3 seconds base interval
-    maxInterval: 30,     // 30 seconds max interval
-    byHeader: true       // Respect Retry-After header
+    maxAttempts: 3,   // 3 retry attempts
+    interval: 3,      // 3 seconds base interval
+    maxInterval: 30,  // 30 seconds maximum interval
+    retryAfter: true  // Respect Retry-After header
   },
-  throwError: {
-    onError: true,       // Throw parsing errors
-    onErrorStatus: false // Don't throw on HTTP errors
+  onError: {
+    onNative: true,   // Throw native errors
+    onStatus: false   // Don't throw on HTTP errors
   },
-  redirect: "follow"     // Follow redirects
 }
 ```
 
-### Auto-Configurations
+### Automatic Configuration
 
 #### Method
 
-If a body is passed as an option without specifying a method, the method defaults to "POST". When a Request object is passed as the `url` argument, its method is used.
+If a body is provided without specifying a method, the method defaults to `"POST"`. When a Request object is passed as the `url` argument, its method is used.
 
 #### Headers
 
-If the following headers are not specified, they will be automatically set:
+The following headers are automatically set if not specified:
 
-- Accept: `application/json, text/plain`
-- Content-Type: Automatically determined based on the body type:
+- **Accept**: `application/json, text/plain`
+- **Content-Type**: Automatically determined based on the body type:
   - `string`, `URLSearchParams`, `FormData`, `Blob` with type: Not set by this package; [`fetch` will set it automatically](https://fetch.spec.whatwg.org/#concept-bodyinit-extract).
   - `JSONValue`: `application/json`
   - `Blob` without type: `application/octet-stream`
   - `ArrayBuffer`: `application/octet-stream` 
-- Authorization: Set to `Bearer ${options.bearerToken}` if `options.bearerToken` is provided.
+- **Authorization**: Set to `Bearer ${options.bearer}` if `options.bearer` is provided.
 
-**Note1:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
+**Note 1:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
 
-**Note2:** If you pass a body through Request object, Content-Type will NOT be set automatically.
+**Note 2:** If you pass a body through a Request object, Content-Type will NOT be set automatically by this package.
 
-## Error Behavior
+## Error Handling
 
 ### Timeout
 
-If the timeout duration specified in the `timeout` option is exceeded, aborted by standard method `AbortSignal.timeout()`. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
+If the timeout duration specified in the `timeout` option is exceeded, the request is aborted using the standard `AbortSignal.timeout()` method. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
 
 ### HTTPStatusError
 
-If `onErrorStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 200 range. You can access its status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
+If `onStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 2xx range. You can access the status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
 
 ### RedirectError
 
-If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 300 range. You can access its status through this error object. The error message format is: `301 Moved Permanently`.
+If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 3xx range. You can access the status through this error object. The error message format is: `301 Moved Permanently`.
 
-### Others
+### Other Errors
 
-If the `onError` option is set to `true`, any other errors that occur will be thrown directly.
+If the `onNative` option is set to `true`, any other errors that occur will be thrown directly.
 
 ## Usage Examples
 
 ### Basic Requests
+
 ```ts
 import { fetchy, fetchyb } from "@scirexs/fetchy";
 
@@ -230,17 +238,18 @@ const response = await fetchy("https://api.example.com/data", {
   }
 });
 
-// Reuse options with URL
+// Reuse options as preset configuration (avoids Request object limitations)
 const options = { url: "https://api.example.com/data", retry: false };
 await fetchy(null, options);
 await fetchy(null, options);
 ```
 
 ### Authentication
+
 ```ts
 // Bearer token authentication
 const user = await fetchyb<User>("https://api.example.com/me", "json", {
-  bearerToken: "your-access-token"
+  bearer: "your-access-token"
 });
 
 // Custom authorization
@@ -252,6 +261,7 @@ const data = await fetchyb("https://api.example.com/data", "json", {
 ```
 
 ### Timeout and Retry
+
 ```ts
 // Custom timeout
 const response = await fetchy("https://slow-api.example.com", {
@@ -259,12 +269,13 @@ const response = await fetchy("https://slow-api.example.com", {
 });
 
 // Retry with exponential backoff
+// Retry intervals: 1s, 3s (3^1), 9s (3^2), 27s (3^3), 60s (capped at maxInterval)
 const data = await fetchyb("https://api.example.com/data", "json", {
   retry: {
-    max: 5,           // Retry up to 5 times
-    interval: 2,      // First retry is fixed 1 second. From next, start with 2 seconds
+    maxAttempts: 5,   // Retry up to 5 times
+    interval: 3,      // Base interval for exponential backoff (interval^n)
     maxInterval: 60,  // Cap at 60 seconds
-    byHeader: true    // Respect Retry-After header
+    retryAfter: true  // Respect Retry-After header
   }
 });
 
@@ -275,10 +286,11 @@ const response = await fetchy("https://api.example.com/data", {
 ```
 
 ### Error Handling
+
 ```ts
 import { fetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
 
-// Throw on error (default is same with `fetch`)
+// Throw on error (default behavior, same as native fetch)
 try {
   const response = await fetchy("https://api.example.com/data");
 } catch (error) {
@@ -287,7 +299,7 @@ try {
 
 // Return null on error
 const response = await fetchy("https://api.example.com/data", {
-  throwError: false,
+  onError: false,
 });
 if (response === null) {
   console.log("Request failed");
@@ -296,12 +308,13 @@ if (response === null) {
 // Throw only on HTTP errors
 try {
   const response = await fetchy("https://api.example.com/data", {
-    throwError: { onError: false, onErrorStatus: true }
+    onError: { onNative: false, onStatus: true }
   });
 } catch (error) {
   if (error instanceof HTTPStatusError) {
-    // You can also use error.status and error.body.
     console.error("HTTP error:", error.message);  // e.g., "404 Not Found: (no response body)"
+    console.error("Status:", error.status);
+    console.error("Body:", error.body);
   }
 }
 
@@ -313,32 +326,34 @@ try {
 } catch (error) {
   if (error instanceof RedirectError) {
     console.error("Unexpected redirect:", error.message);
+    console.error("Status:", error.status);
   }
 }
 ```
 
 ### Advanced Usage
+
 ```ts
 // Jitter to prevent thundering herd
 const response = await fetchy("https://api.example.com/data", {
-  jitter: 2,  // Random delay up to 2 seconds before request
-  retry: { max: 3 }
+  delay: 2,  // Random delay up to 2 seconds before request
+  retry: { maxAttempts: 3 }
 });
 
-// Combined abort control
+// Combined abort signals
 const controller1 = new AbortController();
 const controller2 = new AbortController();
 const request = new Request("https://api.example.com/data", {
   signal: controller1.signal
-})
+});
 
 setTimeout(() => controller1.abort(), 5000);  // Abort after 5 seconds
 
-const response = await fetchy(, {
+const response = await fetchy(request, {
   signal: controller2.signal
 });
 
-// Form data
+// Form data upload
 const formData = new FormData();
 formData.append("file", blob);
 formData.append("name", "example");
@@ -357,12 +372,14 @@ const response = await fetchy("https://api.example.com/form", {
 ```
 
 ### Type-Safe API Responses
+
 ```ts
 interface ApiResponse<T> {
   success: boolean;
   data: T;
   error?: string;
 }
+
 interface Todo {
   id: number;
   title: string;
@@ -379,32 +396,36 @@ if (response.success) {
 }
 ```
 
-## Restriction
+## Limitations
 
-### ReadableStream as Body
+### Return Type Inference
 
-`FetchyOption` is not accepted ReadableStream as a body. If you want to use it, set it to Request, and call with it.
+When setting the `onError` property in `FetchyOptions`, the return type will include `null` even if you set it to `true` or `{ onNative: true }`. To prevent this and ensure a non-nullable return type, add `as const` to the `onError` property value:
 
-### Content-Type Header
-
-If a body set in a Request object, Content-Type header is NOT set automatically on this package. Therefore, when using Request, you have to explicitly set the Content-Type other than what the `fetch` API sets automatically.
-
-### Infer the Return Type
-
-When setting the `throwError` property in `FetchyOptions`, the return type will include `null` even if you set it to `true` or `{ onError: true }`. To prevent this and ensure a non-nullable return type, add `as const` to the `throwError` property value:
 ```ts
 interface User {
   id: number;
   name: string;
 }
 
-const options = { timeout: 5, throwError: true as const };  // Add `as const`
-const response = await fetchy("https://api.example.com/todos/1", "json", options); // `response` is User (not User | null)
+const options = { timeout: 5, onError: true as const };  // Add `as const`
+const response = await fetchy("https://api.example.com/todos/1", "json", options);
+// `response` is User (not User | null)
 ```
 
-### Redirect Error
+### Content-Type Header with Request Objects
 
-If set `"error"` to `redirect` property in a options, this package throw `RedirectError` as custom error. This is to handle retries properly.
+When a body is set in a Request object, the Content-Type header is NOT set automatically by this package. Therefore, when using Request objects, you must explicitly set the Content-Type header for any body types other than those automatically handled by the native `fetch` API.
+
+This limitation can be avoided by using the `url` property in `FetchyOptions` instead of Request objects. This approach allows you to benefit from all automatic header configuration features while still maintaining reusable preset configurations. See the "Reuse options as preset configuration" example in the [Basic Requests](#basic-requests) section.
+
+### ReadableStream as Body
+
+`FetchyOptions` does not accept ReadableStream as a body. If you need to use ReadableStream, create a Request object with the stream and pass it to `fetchy()`.
+
+### Redirect Error Handling
+
+When `redirect` is set to `"error"`, this package throws a custom `RedirectError` (instead of the native TypeError) to enable proper retry handling for redirect responses.
 
 ## License
 
