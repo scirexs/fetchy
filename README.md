@@ -176,7 +176,7 @@ interface FetchyOptions {
 
 #### Method
 
-If a body is passed as an option without specifying a method, the method will default to "POST".
+If a body is passed as an option without specifying a method, the method defaults to "POST". When a Request object is passed as the `url` argument, its method is used.
 
 #### Headers
 

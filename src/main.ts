@@ -236,7 +236,7 @@ async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | n
 async function fetchy(url: Input, options?: FetchyOptions): Promise<Response | null> {
   try {
     const opts = _getOptions(options);
-    const init = _getRequestInit(options, opts.abort);
+    const init = _getRequestInit(url, options, opts.abort);
     const resp = await _fetchWithRetry(url, init, opts);
     if (!resp.ok && opts.onErrorStatus) throw await HTTPStatusError.fromResponse(resp);
     return resp;
@@ -357,10 +357,10 @@ function _getOptions(options?: FetchyOptions): Options {
  * @param optsAbort - AbortController for timeout handling.
  * @returns Standard RequestInit object.
  */
-function _getRequestInit(options?: FetchyOptions, optsAbort?: AbortController): RequestInit {
+function _getRequestInit(url: Input, options?: FetchyOptions, optsAbort?: AbortController): RequestInit {
   const { body, timeout, retry, bearerToken, throwError, jitter, abort, redirect, ...rest } = options ?? {};
   return {
-    method: body === void 0 ? "GET" : "POST",
+    method: url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
     headers: _getHeaders(options),
     ...(redirect && { redirect: redirect === "error" ? "manual" : redirect }),
     ...(optsAbort && { signal: optsAbort.signal }),
