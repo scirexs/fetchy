@@ -1,5 +1,5 @@
 import { assertEquals, assertExists, assertInstanceOf, assertNotStrictEquals, assertRejects, assertStrictEquals } from "@std/assert";
-import { assertSpyCall, assertSpyCalls, stub } from "@std/testing/mock";
+import { assertSpyCalls, stub } from "@std/testing/mock";
 import {
   _cloneInput,
   _combineSignal,
@@ -449,59 +449,71 @@ Deno.test("_getContentType", async (t) => {
 Deno.test("_getHeaders", async (t) => {
   const defaultAccept = "application/json, text/plain";
   await t.step("default headers", () => {
-    const headers = _getHeaders(undefined);
-    assertEquals(headers, {
-      "Accept": defaultAccept,
-    });
+    const headers = Object.fromEntries(_getHeaders(undefined).entries());
+    const expected = {
+      "accept": defaultAccept,
+    };
+    assertEquals(headers, expected);
   });
 
   await t.step("adds Content-Type for body", () => {
-    const headers = _getHeaders({ body: new Uint8Array([1, 2, 3]) });
-    assertEquals(headers, {
-      "Accept": defaultAccept,
-      "Content-Type": "application/octet-stream",
-    });
+    const headers = Object.fromEntries(_getHeaders({ body: new Uint8Array([1, 2, 3]) }).entries());
+    const expected = {
+      "accept": defaultAccept,
+      "content-type": "application/octet-stream",
+    };
+    assertEquals(headers, expected);
   });
 
   await t.step("adds Authorization for bearer", () => {
-    const headers = _getHeaders({ bearer: "token123" });
-    assertEquals(headers, {
-      "Accept": defaultAccept,
-      "Authorization": "Bearer token123",
-    });
+    const headers = Object.fromEntries(_getHeaders({ bearer: "token123" }).entries());
+    const expected = {
+      "accept": defaultAccept,
+      "authorization": "Bearer token123",
+    };
+    assertEquals(headers, expected);
   });
 
   await t.step("merges custom headers", () => {
-    const headers = _getHeaders({
-      headers: { "X-Custom": "value" },
-    });
-    assertEquals(headers, {
-      "Accept": defaultAccept,
-      "X-Custom": "value",
-    });
+    const headers = Object.fromEntries(
+      _getHeaders({
+        headers: { "x-custom": "value" },
+      }).entries(),
+    );
+    const expected = {
+      "accept": defaultAccept,
+      "x-custom": "value",
+    };
+    assertEquals(headers, expected);
   });
 
   await t.step("custom headers override defaults", () => {
-    const headers = _getHeaders({
-      headers: { "Accept": "text/html" },
-    });
-    assertEquals(headers, {
-      "Accept": "text/html",
-    });
+    const headers = Object.fromEntries(
+      _getHeaders({
+        headers: { "Accept": "text/html" },
+      }).entries(),
+    );
+    const expected = {
+      "accept": "text/html",
+    };
+    assertEquals(headers, expected);
   });
 
   await t.step("all options combined", () => {
-    const headers = _getHeaders({
-      body: { key: "value" },
-      bearer: "token123",
-      headers: { "X-Custom": "value" },
-    });
-    assertEquals(headers, {
-      "Accept": defaultAccept,
-      "Content-Type": "application/json",
-      "Authorization": "Bearer token123",
-      "X-Custom": "value",
-    });
+    const headers = Object.fromEntries(
+      _getHeaders({
+        body: { key: "value" },
+        bearer: "token123",
+        headers: { "X-Custom": "value" },
+      }).entries(),
+    );
+    const expected = {
+      "accept": defaultAccept,
+      "content-type": "application/json",
+      "authorization": "Bearer token123",
+      "x-custom": "value",
+    };
+    assertEquals(headers, expected);
   });
 });
 
@@ -635,8 +647,10 @@ Deno.test("_getRequestInit", async (t) => {
   await t.step("default GET request", () => {
     const init = _getRequestInit("", _DEFAULT, undefined);
     assertEquals(init.method, "GET");
-    assertEquals(init.headers, {
-      "Accept": "application/json, text/plain",
+    assertEquals(init.headers instanceof Headers, true);
+    const headers = Object.fromEntries((init.headers as Headers).entries());
+    assertEquals(headers, {
+      "accept": "application/json, text/plain",
     });
     assertExists(init.signal);
     assertEquals(init.body, undefined);
@@ -1332,20 +1346,18 @@ Deno.test("fetchy", async (t) => {
     try {
       const resp = await fetchy("https://example.com", { body: { key: "value" } });
       assertEquals(resp?.status, 200);
-      assertSpyCall(mockFetch, 0, {
-        args: [
-          "https://example.com",
-          {
-            method: "POST",
-            headers: {
-              "Accept": "application/json, text/plain",
-              "Content-Type": "application/json",
-            },
-            signal: mockFetch.calls[0]!.args[1]!.signal,
-            body: '{"key":"value"}',
-          },
-        ],
-      });
+
+      assertSpyCalls(mockFetch, 1);
+
+      const [url, init] = mockFetch.calls[0].args;
+
+      assertEquals(url, "https://example.com");
+      assertEquals(init?.method, "POST");
+      assertEquals(init?.body, '{"key":"value"}');
+      assertEquals(init?.signal instanceof AbortSignal, true);
+      const headers = new Headers(init?.headers);
+      assertEquals(headers.get("accept"), "application/json, text/plain");
+      assertEquals(headers.get("content-type"), "application/json");
     } finally {
       mockFetch.restore();
     }
@@ -1456,19 +1468,17 @@ Deno.test("fetchy", async (t) => {
     );
     try {
       await fetchy("https://example.com", { bearer: "secret" });
-      assertSpyCall(mockFetch, 0, {
-        args: [
-          "https://example.com",
-          {
-            method: "GET",
-            headers: {
-              "Accept": "application/json, text/plain",
-              "Authorization": "Bearer secret",
-            },
-            signal: mockFetch.calls[0]!.args[1]!.signal,
-          },
-        ],
-      });
+
+      assertSpyCalls(mockFetch, 1);
+
+      const [url, init] = mockFetch.calls[0].args;
+
+      assertEquals(url, "https://example.com");
+      assertEquals(init?.method, "GET");
+      assertEquals(init?.signal instanceof AbortSignal, true);
+      const headers = new Headers(init?.headers);
+      assertEquals(headers.get("accept"), "application/json, text/plain");
+      assertEquals(headers.get("authorization"), "Bearer secret");
     } finally {
       mockFetch.restore();
     }

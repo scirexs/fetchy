@@ -229,7 +229,6 @@ async function fetchyb<T>(url: Input | null, type: ParseType = "auto", options?:
  * });
  * ```
  */
-
 async function fetchy(url: Input | null, options?: undefined): Promise<Response>;
 async function fetchy(url: Input | null, options: FetchyOptions & ThrowError): Promise<Response>;
 async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Response | null>;
@@ -392,14 +391,15 @@ function _isJSONObject(arg?: FetchyBody): boolean {
  * @param options - User-provided options.
  * @returns Headers object.
  */
-function _getHeaders(options?: FetchyOptions): HeadersInit {
-  const type = _getContentType(options?.body);
-  return {
-    "Accept": "application/json, text/plain",
-    ...(type && { "Content-Type": type }),
-    ...(options?.bearer && { "Authorization": `Bearer ${options.bearer}` }),
-    ...options?.headers,
-  };
+function _getHeaders(options?: FetchyOptions): Headers {
+  const headers = new Headers(options?.headers);
+  if (!headers.has("Accept")) headers.append("Accept", "application/json, text/plain");
+  if (!headers.has("Content-Type")) {
+    const type = _getContentType(options?.body);
+    if (type) headers.append("Content-Type", type);
+  }
+  if (options?.bearer) headers.set("Authorization", `Bearer ${options.bearer}`);
+  return headers;
 }
 /**
  * Determines Content-Type header based on body type.
