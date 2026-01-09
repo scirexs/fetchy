@@ -1,4 +1,5 @@
 import { build, emptyDir } from "jsr:@deno/dnt";
+import * as esbuild from "npm:esbuild@^0.27.2";
 import packageInfo from "./deno.json" with { type: "json" };
 
 await emptyDir("./npm");
@@ -38,8 +39,32 @@ await build({
       url: "https://github.com/scirexs/fetchy/issues"
     },
   },
-  postBuild() {
+  async postBuild() {
+    const main = "./npm/esm/main.js";
+    removeInternals(main);
+    minify(main);
     Deno.copyFileSync("LICENSE", "npm/LICENSE");
     Deno.copyFileSync("README.md", "npm/README.md");
   },
 });
+
+function removeInternals(path: string) {
+  const content = Deno.readTextFileSync(path);
+  const lines = content.split("\n");
+  lines[0] = "export { fetchy, fetchyb, HTTPStatusError, RedirectError };";
+  Deno.writeTextFileSync(path, lines.join("\n"));
+}
+
+async function minify(path: string) {
+  try {
+    const result = await esbuild.build({
+      entryPoints: [path],
+      write: false,
+      minify: true,
+      bundle: false,
+    });
+    await Deno.writeTextFile(path, result.outputFiles[0].text);
+  } finally {
+    esbuild.stop();
+  }
+}
