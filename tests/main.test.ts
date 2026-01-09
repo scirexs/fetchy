@@ -1,5 +1,12 @@
-import { assertEquals, assertExists, assertInstanceOf, assertNotStrictEquals, assertRejects, assertStrictEquals } from "@std/assert";
-import { assertSpyCalls, stub } from "@std/testing/mock";
+import {
+  assertEquals,
+  assertExists,
+  assertInstanceOf,
+  assertNotStrictEquals,
+  assertRejects,
+  assertStrictEquals,
+} from "jsr:@std/assert@^1.0.16";
+import { assertSpyCalls, stub } from "jsr:@std/testing@^1.0.16/mock";
 import {
   _cloneInput,
   _combineSignal,
