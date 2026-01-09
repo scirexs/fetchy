@@ -32,10 +32,7 @@ export {
 import type { ErrorOptions, FetchyBody, FetchyOptions, RetryOptions } from "./types.ts";
 
 /*=============== Constant Values ===============*/
-/**
- * Default configuration values for fetchy.
- * These values are used when corresponding options are not specified.
- */
+/** Default configuration values for fetchy. */
 const _DEFAULT: Options = {
   timeout: 15,
   delay: 0,
@@ -49,20 +46,11 @@ const _DEFAULT: Options = {
 } as const;
 
 /*=============== Internal Types ================*/
-/**
- * Valid input types for fetch requests.
- * @internal
- */
+/** Valid input types for fetch requests. */
 type Input = string | URL | Request;
-/**
- * Response body parsing type specification.
- * @internal
- */
+/** Response body parsing type specification. */
 type ParseType = "text" | "json" | "bytes" | "auto";
-/**
- * Internal normalized options used throughout the fetch process.
- * @internal
- */
+/** Internal normalized options used throughout the fetch process. */
 interface Options {
   timeout: number;
   delay: number;
@@ -74,10 +62,7 @@ interface Options {
   onStatus: boolean;
   redirect: "follow" | "error" | "manual";
 }
-/**
- * Infer helper type for response type overload.
- * @internal
- */
+/** Infer helper type for response type overload. */
 type ThrowError = FetchyOptions & Partial<{ throwError: true }> | FetchyOptions & Partial<{ throwError: { onError: true } }>;
 
 /*=============== Main Code =====================*/
@@ -247,39 +232,19 @@ async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Respo
 }
 
 /*=============== Helper Code ===================*/
-/**
- * Checks if a value is a string.
- * @internal
- * @param v - Value to check.
- * @returns True if the value is a string.
- */
+/** Checks if a value is a string. */
 function _isString(v: unknown): v is string {
   return typeof v === "string";
 }
-/**
- * Checks if a value is a number.
- * @internal
- * @param v - Value to check.
- * @returns True if the value is a number.
- */
+/** Checks if a value is a number. */
 function _isNumber(v: unknown): v is number {
   return typeof v === "number";
 }
-/**
- * Checks if a value is a boolean.
- * @internal
- * @param v - Value to check.
- * @returns True if the value is a boolean.
- */
+/** Checks if a value is a boolean. */
 function _isBool(v: unknown): v is boolean {
   return typeof v === "boolean";
 }
-/**
- * Checks if a value is a plain object (not array, null, or other object types).
- * @internal
- * @param v - Value to check.
- * @returns True if the value is a plain object.
- */
+/** Checks if a value is a plain object (not array, null, or other object types). */
 function _isPlainObject(v: unknown): v is object {
   return Boolean(
     v &&
@@ -288,13 +253,7 @@ function _isPlainObject(v: unknown): v is object {
       v.constructor === Object,
   );
 }
-/**
- * Determines whether to throw an error based on configuration.
- * @internal
- * @param prop - The error option property to check.
- * @param options - Error configuration or boolean flag.
- * @returns True if error should be thrown.
- */
+/** Determines whether to throw an error based on configuration. */
 function _throwError(prop: keyof ErrorOptions, options?: ErrorOptions | boolean): boolean {
   return Boolean(
     (options === void 0 && _DEFAULT[prop]) ||
@@ -302,26 +261,12 @@ function _throwError(prop: keyof ErrorOptions, options?: ErrorOptions | boolean)
       (typeof options === "object" && (options[prop] ?? _DEFAULT[prop])),
   );
 }
-/**
- * Corrects a number to be non-negative, using default if invalid.
- * @internal
- * @param dflt - Default value to use if number is invalid.
- * @param num - Number to validate.
- * @param integer - Whether to truncate to integer.
- * @returns Corrected number.
- */
+/** Corrects a number to be non-negative, using default if invalid. */
 function _correctNumber(dflt: number, num?: number, integer: boolean = false): number {
   if (num === void 0 || num < 0) return dflt;
   return integer ? Math.trunc(num) : num;
 }
-/**
- * Gets retry option value from configuration with fallback to default.
- * @internal
- * @param prop - The retry option property to get.
- * @param off - Fallback value when retry is disabled.
- * @param options - Retry configuration.
- * @returns The retry option value.
- */
+/** Gets retry option value from configuration with fallback to default. */
 function _getRetryOption(prop: keyof RetryOptions, off: number, options?: RetryOptions | false): number;
 function _getRetryOption(prop: keyof RetryOptions, off: boolean, options?: RetryOptions | false): boolean;
 function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, options?: RetryOptions | false): number | boolean {
@@ -330,12 +275,7 @@ function _getRetryOption(prop: keyof RetryOptions, off: number | boolean, option
   if (_isNumber(options[prop])) return _correctNumber(_DEFAULT[prop] as number, options[prop], prop === "maxAttempts");
   return options[prop];
 }
-/**
- * Converts FetchyOptions to internal Options format with validated values.
- * @internal
- * @param options - User-provided options.
- * @returns Normalized internal options.
- */
+/** Converts FetchyOptions to internal Options format with validated values. */
 function _getOptions(options?: FetchyOptions): Options {
   return {
     timeout: _correctNumber(_DEFAULT.timeout, options?.timeout),
@@ -348,14 +288,7 @@ function _getOptions(options?: FetchyOptions): Options {
     redirect: options?.redirect ?? _DEFAULT.redirect,
   };
 }
-/**
- * Converts FetchyOptions to standard RequestInit format.
- * @internal
- * @param url - Original request URL.
- * @param opts - Internal options.
- * @param options - User-provided options.
- * @returns Standard RequestInit object.
- */
+/** Converts FetchyOptions to standard RequestInit format. */
 function _getRequestInit(url: Input, opts: Options, options?: FetchyOptions): RequestInit {
   const { method, body, timeout, retry, bearer, onError, delay, redirect, signal, ...rest } = options ?? {};
   return {
@@ -367,30 +300,15 @@ function _getRequestInit(url: Input, opts: Options, options?: FetchyOptions): Re
     ...rest,
   };
 }
-/**
- * Converts FetchyBody to standard BodyInit format.
- * @internal
- * @param body - Body content to convert.
- * @returns Standard BodyInit or undefined.
- */
+/** Converts FetchyBody to standard BodyInit format. */
 function _getBody(body: FetchyBody): BodyInit | undefined {
   return _isJSONObject(body) ? JSON.stringify(body) : body as BodyInit;
 }
-/**
- * Checks if a value should be treated as JSON object for serialization.
- * @internal
- * @param arg - Value to check.
- * @returns True if value should be JSON stringified.
- */
+/** Checks if a value should be treated as JSON object for serialization. */
 function _isJSONObject(arg?: FetchyBody): boolean {
   return Boolean(arg === null || _isNumber(arg) || _isBool(arg) || Array.isArray(arg) || _isPlainObject(arg));
 }
-/**
- * Constructs request headers with automatic Content-Type and Authorization.
- * @internal
- * @param options - User-provided options.
- * @returns Headers object.
- */
+/** Constructs request headers with automatic Content-Type and Authorization. */
 function _getHeaders(options?: FetchyOptions): Headers {
   const headers = new Headers(options?.headers);
   if (!headers.has("Accept")) headers.append("Accept", "application/json, text/plain");
@@ -401,26 +319,14 @@ function _getHeaders(options?: FetchyOptions): Headers {
   if (options?.bearer) headers.set("Authorization", `Bearer ${options.bearer}`);
   return headers;
 }
-/**
- * Determines Content-Type header based on body type.
- * @internal
- * @param body - Request body content.
- * @returns Content-Type string or undefined.
- */
+/** Determines Content-Type header based on body type. */
 function _getContentType(body?: FetchyBody): string | undefined {
   if (body === void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams) return;
   if (body instanceof Blob && body.type) return;
   if (_isJSONObject(body)) return "application/json";
   return "application/octet-stream";
 }
-/**
- * Combine abort signals.
- * @internal
- * @param url - Original request URL.
- * @param timeout - Request timeout in seconds.
- * @param signal - AbortSignal in User-provided options.
- * @returns Combined AbortSignal or undefined.
- */
+/** Combine abort signals. */
 function _combineSignal(url: Input, timeout: number, signal?: AbortSignal | null): AbortSignal | undefined {
   const signals: AbortSignal[] = [];
   if (url instanceof Request && url.signal) signals.push(url.signal);
@@ -429,35 +335,17 @@ function _combineSignal(url: Input, timeout: number, signal?: AbortSignal | null
   return signals.length ? AbortSignal.any(signals) : undefined;
 }
 
-/**
- * Waits for specified seconds with optional randomization.
- * @internal
- * @param sec - Seconds to wait.
- * @param random - Whether to randomize the delay.
- */
+/** Waits for specified seconds with optional randomization. */
 async function _wait(sec: number, random: boolean = true) {
   if (sec <= 0) return;
   const delay = Math.trunc((random ? Math.random() : 1) * sec * 1000);
   await new Promise((resolve) => setTimeout(resolve, delay));
 }
-/**
- * Checks if response is a redirect (3xx status).
- * @internal
- * @param resp - Response to check.
- * @returns True if response is a redirect.
- */
+/** Checks if response is a redirect (3xx status). */
 function _shouldRedirect(resp: Response): boolean {
   return resp.status < 400 && resp.status >= 300;
 }
-/**
- * Determines if retry should stop based on conditions and waits if continuing.
- * @internal
- * @param count - Current retry attempt number.
- * @param init - Request initialization object.
- * @param opts - Internal options.
- * @param resp - Response from previous attempt.
- * @returns True if retry should stop.
- */
+/** Determines if retry should stop based on conditions and waits if continuing. */
 async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, resp?: Response): Promise<boolean> {
   if (count >= opts.maxAttempts - 1 || init.signal?.aborted || resp?.ok) return true;
   if (resp && _shouldRedirect(resp)) {
@@ -473,25 +361,13 @@ async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, 
   await _wait(interval, false);
   return false;
 }
-/**
- * Calculates next retry interval using exponential backoff or Retry-After header.
- * @internal
- * @param count - Current retry attempt number.
- * @param opts - Internal options.
- * @param resp - Response from previous attempt.
- * @returns Next retry interval in seconds.
- */
+/** Calculates next retry interval using exponential backoff or Retry-After header. */
 function _getNextInterval(count: number, opts: Options, resp?: Response): number {
   return opts.retryAfter && resp
     ? Math.max(_parseRetryAfter(resp.headers.get("Retry-After")?.trim() ?? ""), opts.interval)
     : Math.min(Math.pow(Math.max(1, opts.interval), count), opts.maxInterval);
 }
-/**
- * Parses Retry-After header value to seconds.
- * @internal
- * @param value - Retry-After header value (seconds or HTTP date).
- * @returns Retry delay in seconds, or Infinity if invalid.
- */
+/** Parses Retry-After header value to seconds. */
 function _parseRetryAfter(value: string): number {
   if (!value) return Infinity;
   const sec1 = Number.parseInt(value, 10);
@@ -500,37 +376,17 @@ function _parseRetryAfter(value: string): number {
   if (!Number.isNaN(sec2)) return sec2;
   return Infinity;
 }
-/**
- * Updates URL and method for redirect responses.
- * @internal
- * @param url - Original request URL.
- * @param init - Request initialization object.
- * @param resp - Redirect response.
- * @returns Updated URL for next request.
- */
+/** Updates URL and method for redirect responses. */
 function _handleRedirectResponse(url: Input, init: RequestInit, resp: Response): Input {
   if (!resp.redirected) return url;
   if (resp.status === 303) init.method = "GET";
   return url instanceof Request ? new Request(resp.url, url) : resp.url;
 }
-/**
- * Clone input if required.
- * @internal
- * @param url - Original request URL.
- * @param required - Switch to clone or not.
- * @returns Cloned input for fetch.
- */
+/** Clone input if required. */
 function _cloneInput(url: Input, required: boolean): Input {
   return url instanceof Request && required ? url.clone() : url;
 }
-/**
- * Executes fetch with retry logic and exponential backoff.
- * @internal
- * @param url - Request URL.
- * @param init - Request initialization object.
- * @param opts - Internal options.
- * @returns Response from successful request.
- */
+/** Executes fetch with retry logic and exponential backoff. */
 async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Promise<Response> {
   for (let i = 0; i < opts.maxAttempts; i++) {
     try {
@@ -546,14 +402,7 @@ async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Pr
   }
   return await _fetchWithJitter(url, init, opts);
 }
-/**
- * Executes fetch with initial jitter delay.
- * @internal
- * @param url - Request URL.
- * @param init - Request initialization object.
- * @param opts - Internal options.
- * @returns Response from request.
- */
+/** Executes fetch with initial jitter delay. */
 async function _fetchWithJitter(url: Input, init: RequestInit, opts: Options): Promise<Response> {
   await _wait(opts.delay);
   return await fetch(url, init);
