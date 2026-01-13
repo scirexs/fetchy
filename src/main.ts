@@ -178,7 +178,7 @@ async function fetchyb<T>(url: Input | null, type: ParseType = "auto", options?:
     if (type === "json" || (type === "auto" && btype === "application/json")) return await resp.json() as T;
     return await resp.bytes();
   } catch (e) {
-    if (_throwError("onNative", options?.onError)) throw e;
+    if (_throwError("onNative", options?.onError) || e instanceof HTTPStatusError) throw e;
     return null;
   }
 }
@@ -226,7 +226,7 @@ async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Respo
     if (!resp.ok && opts.onStatus) throw await HTTPStatusError.fromResponse(resp);
     return resp;
   } catch (e) {
-    if (_throwError("onNative", options?.onError)) throw e;
+    if (_throwError("onNative", options?.onError) || e instanceof HTTPStatusError) throw e;
     return null;
   }
 }
