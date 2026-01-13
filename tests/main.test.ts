@@ -1612,7 +1612,7 @@ Deno.test("fetchyb", async (t) => {
       () => Promise.resolve(new Response("Error", { status: 404 })),
     );
     try {
-      const result = await fetchyb("https://example.com", "text", { retry: false });
+      const result = await fetchyb("https://example.com", "text", { retry: false, onError: { onNative: true, onStatus: false } });
       assertEquals(result, null);
     } finally {
       mockFetch.restore();

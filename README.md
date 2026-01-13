@@ -146,7 +146,7 @@ interface FetchyOptions extends RequestInit {
   // Error throwing behavior
   onError?: {
     onNative?: boolean;  // Throw on native errors (default: true)
-    onStatus?: boolean;  // Throw on 4xx/5xx status (default: false)
+    onStatus?: boolean;  // Throw on 4xx/5xx status (default: true)
   } | boolean;  // Set to true to throw on all errors
   
   // Initial jitter delay in seconds
@@ -171,7 +171,7 @@ interface FetchyOptions extends RequestInit {
   },
   onError: {
     onNative: true,   // Throw native errors
-    onStatus: false   // Don't throw on HTTP errors
+    onStatus: true   // Don't throw on HTTP errors
   },
 }
 ```
@@ -206,7 +206,7 @@ If the timeout duration specified in the `timeout` option is exceeded, the reque
 
 ### HTTPStatusError
 
-If `onStatus` is set to `true`, an `HTTPStatusError` will be thrown when the response status is outside the 2xx range. You can access the status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
+If `onStatus` is set to `true` (default), an `HTTPStatusError` will be thrown when the response status is outside the 2xx range. You can access the status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
 
 ### RedirectError
 
@@ -290,11 +290,15 @@ const response = await fetchy("https://api.example.com/data", {
 ```ts
 import { fetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
 
-// Throw on error (default behavior, same as native fetch)
+// Throw on error and not ok response (default behavior)
 try {
   const response = await fetchy("https://api.example.com/data");
 } catch (error) {
-  console.error("Request failed:", error);
+  if (error instanceof HTTPStatusError) {
+    console.error("HTTP error:", error.message);  // e.g., "404 Not Found: (no response body)"
+    console.error("Status:", error.status);
+    console.error("Body:", error.body);
+  }
 }
 
 // Return null on error
@@ -305,17 +309,13 @@ if (response === null) {
   console.log("Request failed");
 }
 
-// Throw only on HTTP errors
+// Throw only on native errors
 try {
   const response = await fetchy("https://api.example.com/data", {
-    onError: { onNative: false, onStatus: true }
+    onError: { onNative: true, onStatus: false } as const
   });
 } catch (error) {
-  if (error instanceof HTTPStatusError) {
-    console.error("HTTP error:", error.message);  // e.g., "404 Not Found: (no response body)"
-    console.error("Status:", error.status);
-    console.error("Body:", error.body);
-  }
+  console.error("Request failed:", error);
 }
 
 // Handle redirects
@@ -408,7 +408,7 @@ interface User {
   name: string;
 }
 
-const options = { timeout: 5, onError: true as const };  // Add `as const`
+const options = { timeout: 5, onError: { onNative: true, onStatus: false } as const };  // Add `as const`
 const response = await fetchy("https://api.example.com/todos/1", "json", options);
 // `response` is User (not User | null)
 ```

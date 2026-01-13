@@ -41,7 +41,7 @@ const _DEFAULT: Options = {
   maxAttempts: 3,
   retryAfter: true,
   onNative: true,
-  onStatus: false,
+  onStatus: true,
   redirect: "follow",
 } as const;
 
