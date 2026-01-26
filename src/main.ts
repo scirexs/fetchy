@@ -237,22 +237,22 @@ async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Respo
 /*=============== Helper Codes ==================*/
 /** Checks if a value is a string. */
 function _isString(v: unknown): v is string {
-  return typeof v === "string";
+  return typeof v == "string";
 }
 /** Checks if a value is a number. */
 function _isNumber(v: unknown): v is number {
-  return typeof v === "number";
+  return typeof v == "number";
 }
 /** Checks if a value is a boolean. */
 function _isBool(v: unknown): v is boolean {
-  return typeof v === "boolean";
+  return typeof v == "boolean";
 }
 /** Checks if a value is a plain object (not array, null, or other object types). */
 function _isPlainObject(v: unknown): v is object {
   return Boolean(
     v &&
-      typeof v === "object" &&
-      Object.prototype.toString.call(v).slice(8, -1) === "Object" &&
+      typeof v == "object" &&
+      Object.prototype.toString.call(v).slice(8, -1) == "Object" &&
       v.constructor === Object,
   );
 }
@@ -260,8 +260,8 @@ function _isPlainObject(v: unknown): v is object {
 function _throwError(prop: keyof ErrorOptions, options?: ErrorOptions | boolean): boolean {
   return Boolean(
     (options === void 0 && _DEFAULT[prop]) ||
-      (typeof options === "boolean" && options) ||
-      (typeof options === "object" && (options[prop] ?? _DEFAULT[prop])),
+      (typeof options == "boolean" && options) ||
+      (typeof options == "object" && (options[prop] ?? _DEFAULT[prop])),
   );
 }
 /** Corrects a number to be non-negative, using default if invalid. */
@@ -296,9 +296,9 @@ function _getRequestInit(url: Input, opts: Options, options?: FetchyOptions): Re
   const { method, body, timeout, retry, bearer, onError, delay, redirect, signal, ...rest } = options ?? {};
   return {
     headers: _getHeaders(options),
-    method: method ? method : url instanceof Request ? url.method : body === void 0 ? "GET" : "POST",
+    method: method ? method : url instanceof Request ? url.method : body == void 0 ? "GET" : "POST",
     signal: _combineSignal(url, opts.timeout, options?.signal),
-    ...(redirect && { redirect: redirect === "error" ? "manual" : redirect }),
+    ...(redirect && { redirect: redirect == "error" ? "manual" : redirect }),
     ...(body && { body: _getBody(body) }),
     ...rest,
   };
@@ -352,8 +352,8 @@ function _shouldRedirect(resp: Response): boolean {
 async function _shouldNotRetry(count: number, init: RequestInit, opts: Options, resp?: Response): Promise<boolean> {
   if (count >= opts.maxAttempts - 1 || init.signal?.aborted || resp?.ok) return true;
   if (resp && _shouldRedirect(resp)) {
-    if (opts.redirect === "manual") return true;
-    if (opts.redirect === "error") {
+    if (opts.redirect == "manual") return true;
+    if (opts.redirect == "error") {
       opts.maxAttempts = 0;
       throw RedirectError.fromResponse(resp);
     }
@@ -382,7 +382,7 @@ function _parseRetryAfter(value: string): number {
 /** Updates URL and method for redirect responses. */
 function _handleRedirectResponse(url: Input, init: RequestInit, resp: Response): Input {
   if (!resp.redirected) return url;
-  if (resp.status === 303) init.method = "GET";
+  if (resp.status == 303) init.method = "GET";
   return url instanceof Request ? new Request(resp.url, url) : resp.url;
 }
 /** Clone input if required. */
