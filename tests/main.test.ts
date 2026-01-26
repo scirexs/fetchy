@@ -35,6 +35,7 @@ import {
   fetchy,
   fetchyb,
   HTTPStatusError,
+  NO_RETRY_ERROR,
   RedirectError,
 } from "../src/main.ts";
 
@@ -1134,7 +1135,6 @@ Deno.test("_fetchWithJitter", async (t) => {
         ..._DEFAULT,
         delay: 0.05, // Max 50ms
         interval: 1,
-        abort: new AbortController(),
       };
       const start = Date.now();
       const resp = await _fetchWithJitter("https://example.com", {}, opts);
@@ -1157,7 +1157,6 @@ Deno.test("_fetchWithJitter", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 1,
-        abort: new AbortController(),
       };
       const start = Date.now();
       await _fetchWithJitter("https://example.com", {}, opts);
@@ -1181,7 +1180,6 @@ Deno.test("_fetchWithRetry", async (t) => {
       const opts = {
         ..._DEFAULT,
         interval: 0.01,
-        abort: new AbortController(),
       };
       const resp = await _fetchWithRetry("https://example.com", {}, opts);
       assertEquals(resp.status, 200);
@@ -1204,7 +1202,6 @@ Deno.test("_fetchWithRetry", async (t) => {
         ..._DEFAULT,
         interval: 0.01,
         retryAfter: false,
-        abort: new AbortController(),
       };
       const resp = await _fetchWithRetry("https://example.com", {}, opts);
       assertEquals(resp.status, 200);
@@ -1224,7 +1221,6 @@ Deno.test("_fetchWithRetry", async (t) => {
         ..._DEFAULT,
         interval: 0.01,
         retryAfter: false,
-        abort: new AbortController(),
       };
       await assertRejects(
         () => _fetchWithRetry("https://example.com", {}, opts),
@@ -1248,10 +1244,32 @@ Deno.test("_fetchWithRetry", async (t) => {
         interval: 0.01,
         maxAttempts: 0,
         retryAfter: false,
-        abort: new AbortController(),
       };
       const resp = await _fetchWithRetry("https://example.com", {}, opts);
       assertEquals(resp.status, 200);
+      assertSpyCalls(mockFetch, 1);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+  await t.step("no retry when error message is NO_RETRY_ERROR", async () => {
+    const mockFetch = stub(
+      globalThis,
+      "fetch",
+      () => Promise.reject(new Error(NO_RETRY_ERROR)),
+    );
+    try {
+      const opts = {
+        ..._DEFAULT,
+        interval: 0.01,
+        maxAttempts: 3,
+        retryAfter: false,
+      };
+      await assertRejects(
+        async () => await _fetchWithRetry("https://example.com", {}, opts),
+        Error,
+        NO_RETRY_ERROR,
+      );
       assertSpyCalls(mockFetch, 1);
     } finally {
       mockFetch.restore();
@@ -1270,7 +1288,6 @@ Deno.test("_fetchWithRetry", async (t) => {
         interval: 0.01,
         maxAttempts: 1,
         retryAfter: false,
-        abort: new AbortController(),
       };
       const start = Date.now();
       await _fetchWithRetry("https://example.com", {}, opts);
@@ -1290,7 +1307,6 @@ Deno.test("_fetchWithRetry", async (t) => {
         interval: 0.01,
         retryAfter: false,
         redirect: "error" as const,
-        abort: new AbortController(),
       };
       await assertRejects(
         async () => await _fetchWithRetry("https://example.com", { redirect: "manual" }, opts),

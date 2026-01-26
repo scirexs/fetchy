@@ -26,12 +26,15 @@ export {
   fetchy,
   fetchyb,
   HTTPStatusError,
+  NO_RETRY_ERROR,
   RedirectError,
 };
 
 import type { ErrorOptions, FetchyBody, FetchyOptions, RetryOptions } from "./types.ts";
 
 /*=============== Constant Values ===============*/
+/** Error message of fetch to cancel retry. */
+const NO_RETRY_ERROR = "$$_NO_RETRY_$$";
 /** Default configuration values for fetchy. */
 const _DEFAULT: Options = {
   timeout: 15,
@@ -65,7 +68,7 @@ interface Options {
 /** Infer helper type for response type overload. */
 type ThrowError = FetchyOptions & Partial<{ throwError: true }> | FetchyOptions & Partial<{ throwError: { onError: true } }>;
 
-/*=============== Main Code =====================*/
+/*=============== Main Codes ====================*/
 /**
  * Error thrown when HTTP response has a non-OK status code (4xx, 5xx, ...).
  * Only thrown when throwError.onErrorStatus is set to true.
@@ -231,7 +234,7 @@ async function fetchy(url: Input | null, options?: FetchyOptions): Promise<Respo
   }
 }
 
-/*=============== Helper Code ===================*/
+/*=============== Helper Codes ==================*/
 /** Checks if a value is a string. */
 function _isString(v: unknown): v is string {
   return typeof v === "string";
@@ -396,6 +399,7 @@ async function _fetchWithRetry(url: Input, init: RequestInit, opts: Options): Pr
       url = _handleRedirectResponse(url, init, resp);
       continue;
     } catch (e) {
+      if (e instanceof Error && e.message == NO_RETRY_ERROR) throw e;
       if (await _shouldNotRetry(i, init, opts)) throw e;
       continue;
     }

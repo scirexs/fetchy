@@ -369,6 +369,19 @@ params.append("key", "value");
 const response = await fetchy("https://api.example.com/form", {
   body: params
 });
+
+// Force no retries for specific error messages during testing
+const originalFetch = globalThis.fetch;
+globalThis.fetch = () => Promise.reject(new Error(NO_RETRY_ERROR));
+
+try {
+  await fetchy("https://api.example.com/data");
+} catch (error) {
+  // Error is thrown immediately without retries
+  console.error(error);
+} finally {
+  globalThis.fetch = originalFetch;
+}
 ```
 
 ### Type-Safe API Responses
