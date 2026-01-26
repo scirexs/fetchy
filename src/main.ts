@@ -249,12 +249,7 @@ function _isBool(v: unknown): v is boolean {
 }
 /** Checks if a value is a plain object (not array, null, or other object types). */
 function _isPlainObject(v: unknown): v is object {
-  return Boolean(
-    v &&
-      typeof v == "object" &&
-      Object.prototype.toString.call(v).slice(8, -1) == "Object" &&
-      v.constructor === Object,
-  );
+  return Boolean(v && typeof v == "object" && Object.getPrototypeOf(v) === Object.prototype);
 }
 /** Determines whether to throw an error based on configuration. */
 function _throwError(prop: keyof ErrorOptions, options?: ErrorOptions | boolean): boolean {
