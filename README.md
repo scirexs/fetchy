@@ -4,11 +4,11 @@
 [![JSR](https://img.shields.io/jsr/v/%40scirexs/fetchy)](https://jsr.io/@scirexs/fetchy)
 [![license](https://img.shields.io/github/license/scirexs/fetchy)](https://github.com/scirexs/fetchy/blob/main/LICENSE)
 
-A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing.
+A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing. Works in Deno, Node.js, and modern browsers.
 
 ## Features
 
-- **Lightweight** - Zero dependencies, works in Deno, Node.js, and browsers
+- **Lightweight** - Bundle size is ~6KB uncompressed, ~3KB gzipped, zero dependencies
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
 - **Retry Logic** - Exponential backoff with Retry-After header support

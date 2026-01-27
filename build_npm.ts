@@ -32,6 +32,12 @@ await build({
     },
     keywords: [
       "fetch",
+      "fetch-wrapper",
+      "fetch-client",
+      "request",
+      "http",
+      "get",
+      "url",
       "typescript",
     ],
     homepage: "https://github.com/scirexs/fetchy#readme",
@@ -51,7 +57,7 @@ await build({
 function removeInternals(path: string) {
   const content = Deno.readTextFileSync(path);
   const lines = content.split("\n");
-  lines[0] = "export { fetchy, fetchyb, HTTPStatusError, RedirectError };";
+  lines[0] = "export { Fetchy, fetchy, HTTPStatusError, NO_RETRY_ERROR, RedirectError, sfetchy };"
   Deno.writeTextFileSync(path, lines.join("\n"));
 }
 
