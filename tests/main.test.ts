@@ -27,13 +27,13 @@ import {
   _isNumber,
   _isPlainObject,
   _isString,
+  _main,
+  _parseBody,
   _parseRetryAfter,
+  _shouldCorrectRequest,
   _shouldNotRetry,
   _shouldRedirect,
-  _throwError,
   _wait,
-  fetchy,
-  fetchyb,
   HTTPStatusError,
   NO_RETRY_ERROR,
   RedirectError,
@@ -249,32 +249,6 @@ Deno.test("_correctNumber", async (t) => {
   });
 });
 
-Deno.test("_throwError", async (t) => {
-  await t.step("returns default when onError is undefined", () => {
-    assertEquals(_throwError("onNative", undefined), _DEFAULT.onNative);
-    assertEquals(_throwError("onStatus", undefined), _DEFAULT.onStatus);
-  });
-
-  await t.step("returns onError boolean value", () => {
-    assertEquals(_throwError("onNative", true), true);
-    assertEquals(_throwError("onNative", false), false);
-    assertEquals(_throwError("onStatus", true), true);
-    assertEquals(_throwError("onStatus", false), false);
-  });
-
-  await t.step("returns onError object property", () => {
-    assertEquals(_throwError("onNative", { onNative: true }), true);
-    assertEquals(_throwError("onNative", { onNative: false }), false);
-    assertEquals(_throwError("onStatus", { onStatus: true }), true);
-    assertEquals(_throwError("onStatus", { onStatus: false }), false);
-  });
-
-  await t.step("returns default when property is undefined in object", () => {
-    assertEquals(_throwError("onNative", {}), _DEFAULT.onNative);
-    assertEquals(_throwError("onStatus", {}), _DEFAULT.onStatus);
-  });
-});
-
 Deno.test("_getRetryOption", async (t) => {
   await t.step("returns default value when options is undefined", () => {
     assertEquals(_getRetryOption("interval", 0, undefined), _DEFAULT.interval);
@@ -315,7 +289,7 @@ Deno.test("_getOptions", async (t) => {
     assertEquals(opts.maxInterval, _DEFAULT.maxInterval);
     assertEquals(opts.maxAttempts, _DEFAULT.maxAttempts);
     assertEquals(opts.retryAfter, _DEFAULT.retryAfter);
-    assertEquals(opts.onStatus, _DEFAULT.onStatus);
+    assertEquals(opts.native, _DEFAULT.native);
     assertEquals(opts.redirect, _DEFAULT.redirect);
   });
 
@@ -347,9 +321,9 @@ Deno.test("_getOptions", async (t) => {
     assertEquals(opts.retryAfter, false);
   });
 
-  await t.step("enables onStatus with onError option", () => {
-    const opts = _getOptions({ onError: { onStatus: true } });
-    assertEquals(opts.onStatus, true);
+  await t.step("enables native with native option", () => {
+    const opts = _getOptions({ native: true });
+    assertEquals(opts.native, true);
   });
 });
 
@@ -439,7 +413,6 @@ Deno.test("_getContentType", async (t) => {
   await t.step("JSON object body", () => {
     assertEquals(_getContentType({ key: "value" }), "application/json");
     assertEquals(_getContentType([1, 2, 3]), "application/json");
-    assertEquals(_getContentType(null), "application/json");
     assertEquals(_getContentType(true), "application/json");
     assertEquals(_getContentType(123), "application/json");
   });
@@ -743,6 +716,53 @@ Deno.test("_getRequestInit", async (t) => {
   });
 });
 
+Deno.test("_parseBody", async (t) => {
+  await t.step("parses json response correctly", async () => {
+    const mockData = { id: 1, name: "test" };
+    const response = new Response(JSON.stringify(mockData), {
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await _parseBody(response, "json");
+    assertEquals(result, mockData);
+  });
+
+  await t.step("parses text response correctly", async () => {
+    const mockText = "Hello, World!";
+    const response = new Response(mockText);
+
+    const result = await _parseBody(response, "text");
+    assertEquals(result, mockText);
+  });
+
+  await t.step("parses bytes response correctly", async () => {
+    const mockText = "test data";
+    const response = new Response(mockText);
+
+    const result = await _parseBody(response, "bytes") as Uint8Array;
+    assertEquals(result instanceof Uint8Array, true);
+    assertEquals(new TextDecoder().decode(result), mockText);
+  });
+
+  await t.step("parses blob response correctly", async () => {
+    const mockText = "blob data";
+    const response = new Response(mockText);
+
+    const result = await _parseBody(response, "blob") as Blob;
+    assertEquals(result instanceof Blob, true);
+    assertEquals(await result.text(), mockText);
+  });
+
+  await t.step("parses buffer response correctly", async () => {
+    const mockText = "buffer data";
+    const response = new Response(mockText);
+
+    const result = await _parseBody(response, "buffer") as ArrayBuffer;
+    assertEquals(result instanceof ArrayBuffer, true);
+    assertEquals(new TextDecoder().decode(result), mockText);
+  });
+});
+
 Deno.test("_wait", async (t) => {
   await t.step("wait for random positive seconds", async () => {
     for (let i = 0; i < 10; i++) {
@@ -824,6 +844,22 @@ Deno.test("_shouldRedirect", async (t) => {
   });
 });
 
+Deno.test("_shouldCorrectRequest", async (t) => {
+  await t.step("returns true when status range is 400-499", () => {
+    const resp1 = new Response("", { status: 400 });
+    assertEquals(_shouldCorrectRequest(resp1), true);
+    const resp2 = new Response("", { status: 429 });
+    assertEquals(_shouldCorrectRequest(resp2), true);
+  });
+
+  await t.step("returns false when status is others", () => {
+    const resp1 = new Response("", { status: 200 });
+    assertEquals(_shouldCorrectRequest(resp1), false);
+    const resp2 = new Response("", { status: 500 });
+    assertEquals(_shouldCorrectRequest(resp2), false);
+  });
+});
+
 Deno.test("_handleRedirectResponse", async (t) => {
   const init = { method: "POST" };
   const redirect = "https://redirect.com";
@@ -872,7 +908,7 @@ Deno.test("_handleRedirectResponse", async (t) => {
 });
 
 Deno.test("_getNextInterval", async (t) => {
-  await t.step("returns false and waits for exponential backoff", () => {
+  await t.step("returns waits secs for exponential backoff", () => {
     const opts = {
       ..._DEFAULT,
       interval: 3,
@@ -880,6 +916,29 @@ Deno.test("_getNextInterval", async (t) => {
       retryAfter: false,
     };
     const interval = _getNextInterval(3, opts);
+    assertEquals(interval === 27, true);
+  });
+
+  await t.step("returns maxInterval", () => {
+    const opts = {
+      ..._DEFAULT,
+      interval: 5,
+      maxInterval: 10,
+      maxAttempts: 5,
+    };
+    const resp = new Response("", { status: 500 });
+    const interval = _getNextInterval(3, opts, resp);
+    assertEquals(interval === 10, true);
+  });
+
+  await t.step("response with no Retry-After header returns exponential backoff", () => {
+    const opts = {
+      ..._DEFAULT,
+      interval: 3,
+      maxAttempts: 5,
+    };
+    const resp = new Response("", { status: 500 });
+    const interval = _getNextInterval(3, opts, resp);
     assertEquals(interval === 27, true);
   });
 
@@ -929,6 +988,24 @@ Deno.test("_getNextInterval", async (t) => {
 });
 
 Deno.test("_shouldNotRetry", async (t) => {
+  await t.step("returns false when defaults with http server error", async () => {
+    const opts = _DEFAULT;
+    const resp = new MockResponse(false, "", "Error", { status: 500 });
+    assertEquals(await _shouldNotRetry(0, {}, opts, resp), false);
+  });
+
+  await t.step("returns true when naitive is true", async () => {
+    const opts = { ..._DEFAULT, httpError: false };
+    const resp = new MockResponse(false, "", "Error", { status: 500 });
+    assertEquals(await _shouldNotRetry(0, {}, opts, resp), false);
+  });
+
+  await t.step("returns true when client http error", async () => {
+    const opts = _DEFAULT;
+    const resp = new MockResponse(false, "", "Error", { status: 400 });
+    assertEquals(await _shouldNotRetry(0, {}, opts, resp), true);
+  });
+
   await t.step("returns true when count exceeds maxAttempts", async () => {
     const opts = {
       ..._DEFAULT,
@@ -983,7 +1060,7 @@ Deno.test("_shouldNotRetry", async (t) => {
     await assertRejects(() => _shouldNotRetry(1, {}, opts, resp), RedirectError);
   });
 
-  await t.step("returns true when interval exceeds maxInterval", async () => {
+  await t.step("returns false when interval exceeds maxInterval", async () => {
     const opts = {
       ..._DEFAULT,
       interval: 5,
@@ -991,7 +1068,7 @@ Deno.test("_shouldNotRetry", async (t) => {
       maxAttempts: 5,
     };
     const resp = new Response("", { status: 500 });
-    assertEquals(await _shouldNotRetry(3, {}, opts, resp), true);
+    assertEquals(await _shouldNotRetry(3, {}, opts, resp), false);
   });
 
   await t.step("stops retry when Retry-After exceeds maxInterval", async () => {
@@ -1318,393 +1395,292 @@ Deno.test("_fetchWithRetry", async (t) => {
     }
   });
 });
-Deno.test("fetchy", async (t) => {
-  await t.step("successful GET request", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const resp = await fetchy("https://example.com");
-      assertEquals(resp?.status, 200);
-      assertEquals(await resp?.text(), "ok");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("successful GET request with option url", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const options = { url: "https://example.com" };
-      const resp = await fetchy(null, options);
-      assertEquals(resp?.status, 200);
-      assertEquals(await resp?.text(), "ok");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("throws Error url is null and no option url", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      await assertRejects(() => fetchy(null), Error, "Invalid URL");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("successful POST request with body", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const resp = await fetchy("https://example.com", { body: { key: "value" } });
-      assertEquals(resp?.status, 200);
 
-      assertSpyCalls(mockFetch, 1);
+Deno.test("_main", async (t) => {
+  await t.step("throws error when url is null and options.url is undefined", async () => {
+    await assertRejects(
+      async () => await _main(null, undefined, undefined),
+      TypeError,
+    );
+  });
 
-      const [url, init] = mockFetch.calls[0].args;
+  await t.step("uses options.url when url parameter is null", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
 
-      assertEquals(url, "https://example.com");
-      assertEquals(init?.method, "POST");
-      assertEquals(init?.body, '{"key":"value"}');
-      assertEquals(init?.signal instanceof AbortSignal, true);
-      const headers = new Headers(init?.headers);
-      assertEquals(headers.get("accept"), "application/json, text/plain");
-      assertEquals(headers.get("content-type"), "application/json");
+    try {
+      const result = await _main(null, { url: "https://example.com" }, undefined) as Response;
+      assertEquals(result instanceof Response, true);
+      assertEquals(result.status, 200);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("throws HTTPStatusError on error status", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("Not Found", { status: 404, statusText: "Not Found" })),
-    );
+
+  await t.step("returns Response when parse is undefined", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, undefined);
+      assertEquals(result instanceof Response, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns parsed json when parse is 'json'", async () => {
+    const mockData = { test: "data" };
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(
+        new MockResponse(false, "", JSON.stringify(mockData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, "json");
+      assertEquals(result, mockData);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns parsed text when parse is 'text'", async () => {
+    const mockText = "test text";
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", mockText, { status: 200 }));
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, "text");
+      assertEquals(result, mockText);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns parsed bytes when parse is 'bytes'", async () => {
+    const mockText = "test bytes";
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", mockText, { status: 200 }));
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, "bytes");
+      assertEquals(result instanceof Uint8Array, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns parsed blob when parse is 'blob'", async () => {
+    const mockText = "test blob";
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", mockText, { status: 200 }));
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, "blob");
+      assertEquals(result instanceof Blob, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns parsed buffer when parse is 'buffer'", async () => {
+    const mockText = "test buffer";
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(new MockResponse(false, "", mockText, { status: 200 }));
+    });
+
+    try {
+      const result = await _main("https://example.com", undefined, "buffer");
+      assertEquals(result instanceof ArrayBuffer, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("throws HTTPStatusError for non-ok response by default", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(
+        new MockResponse(false, "", "Error", {
+          status: 404,
+          statusText: "Not Found",
+        }),
+      );
+    });
+
     try {
       await assertRejects(
-        () => fetchy("https://example.com", { onError: { onStatus: true }, retry: false }),
+        async () => await _main("https://example.com", undefined, undefined),
         HTTPStatusError,
-        "404 Not Found: Not Found",
+        "404 Not Found",
       );
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("returns null on error when onError is false", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
+
+  await t.step("does not throw HTTPStatusError when native option is true", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(
+        new MockResponse(false, "", "Error", {
+          status: 404,
+          statusText: "Not Found",
+        }),
+      );
+    });
+
     try {
-      const resp = await fetchy("https://example.com", { onError: false, retry: false });
-      assertEquals(resp, null);
+      const result = await _main("https://example.com", { native: true }, undefined) as Response;
+      assertEquals(result instanceof Response, true);
+      assertEquals(result.status, 404);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("throws error when onError is true", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
+
+  await t.step("throws RedirectError when redirect is 'error' and receives redirect", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => {
+      return Promise.resolve(
+        new MockResponse(true, "", null, {
+          status: 301,
+          statusText: "Moved Permanently",
+        }),
+      );
+    });
+
     try {
       await assertRejects(
-        () => fetchy("https://example.com", { onError: true, retry: false }),
-        Error,
-        "Network error",
+        async () => await _main("https://example.com", { redirect: "error" }, undefined),
+        RedirectError,
+        "301 Moved Permanently",
       );
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("works with URL object", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const url = new URL("https://example.com");
-      const resp = await fetchy(url);
-      assertEquals(resp?.status, 200);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("works with Request object", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const req = new Request("https://example.com");
-      const resp = await fetchy(req);
-      assertEquals(resp?.status, 200);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("uses custom timeout", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_input, init) => {
-        // Return a promise that respects the abort signal
-        return new Promise((resolve, reject) => {
-          const timeoutId = setTimeout(() => resolve(new Response("ok")), 200);
 
-          if (init?.signal) {
-            init.signal.addEventListener("abort", () => {
-              clearTimeout(timeoutId);
-              reject(new DOMException("The operation was aborted.", "AbortError"));
-            });
-          }
-        });
-      },
-    );
-    try {
-      const resp = await fetchy("https://example.com", { timeout: 0.1, retry: false, onError: false });
-      assertEquals(resp, null);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("uses bearer token", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      await fetchy("https://example.com", { bearer: "secret" });
-
-      assertSpyCalls(mockFetch, 1);
-
-      const [url, init] = mockFetch.calls[0].args;
-
-      assertEquals(url, "https://example.com");
-      assertEquals(init?.method, "GET");
+  await t.step("handles timeout option correctly", async () => {
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      // Verify that signal is set
       assertEquals(init?.signal instanceof AbortSignal, true);
-      const headers = new Headers(init?.headers);
-      assertEquals(headers.get("accept"), "application/json, text/plain");
-      assertEquals(headers.get("authorization"), "Bearer secret");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-});
-Deno.test("fetchyb", async (t) => {
-  await t.step("parses text response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response("Hello", {
-            status: 200,
-            headers: { "Content-Type": "text/plain" },
-          }),
-        ),
-    );
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
     try {
-      const result = await fetchyb("https://example.com", "text");
-      assertEquals(result, "Hello");
+      await _main("https://example.com", { timeout: 5 }, undefined);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("parses JSON response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response('{"key":"value"}', {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        ),
-    );
+
+  await t.step("handles retry option correctly with native option", async () => {
+    let callCount = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      callCount++;
+      if (callCount < 2) return Promise.resolve(new MockResponse(false, "", "Error", { status: 500 }));
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
     try {
-      const result = await fetchyb<{ key: string }>("https://example.com", "json");
-      assertEquals(result, { key: "value" });
+      const result = await _main(
+        "https://example.com",
+        { retry: { maxAttempts: 3, interval: 1, maxInterval: 30 }, native: true },
+        undefined,
+      ) as Response;
+      assertEquals(result.status, 500);
+      assertEquals(callCount, 1);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("parses bytes response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response(new Uint8Array([1, 2, 3]), {
-            status: 200,
-          }),
-        ),
-    );
-    try {
-      const result = await fetchyb("https://example.com", "bytes");
-      assertEquals(result, new Uint8Array([1, 2, 3]));
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("auto-detects text response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response("Hello", {
-            status: 200,
-            headers: { "Content-Type": "text/html" },
-          }),
-        ),
-    );
-    try {
-      const result = await fetchyb("https://example.com", "auto");
-      assertEquals(result, "Hello");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("auto-detects JSON response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response('{"key":"value"}', {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        ),
-    );
-    try {
-      const result = await fetchyb<{ key: string }>("https://example.com", "auto");
-      assertEquals(result, { key: "value" });
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("auto-detects bytes response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response(new Uint8Array([1, 2, 3]), {
-            status: 200,
-            headers: { "Content-Type": "application/octet-stream" },
-          }),
-        ),
-    );
-    try {
-      const result = await fetchyb("https://example.com", "auto");
-      assertEquals(result, new Uint8Array([1, 2, 3]));
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("returns null on non-ok response", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("Error", { status: 404 })),
-    );
-    try {
-      const result = await fetchyb("https://example.com", "text", { retry: false, onError: { onNative: true, onStatus: false } });
-      assertEquals(result, null);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("returns null on parse error", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response("invalid json", {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        ),
-    );
-    try {
-      const result = await fetchyb("https://example.com", "json", { onError: false });
-      assertEquals(result, null);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-  await t.step("throws on parse error when onError is true", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response("invalid json", {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        ),
-    );
+
+  await t.step("handles retry option correctly", async () => {
+    let callCount = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      callCount++;
+      return Promise.resolve(new MockResponse(false, "", "Error", { status: 500 }));
+    });
+
     try {
       await assertRejects(
-        () => fetchyb("https://example.com", "json", { onError: true }),
-        SyntaxError,
+        async () =>
+          await _main(
+            "https://example.com",
+            { retry: { maxAttempts: 3, interval: 1, maxInterval: 30 } },
+            undefined,
+          ),
+        HTTPStatusError,
+        "500",
       );
+      assertEquals(callCount, 3);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("returns null when fetchy returns null", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
+  await t.step("handles bearer token in options", async () => {
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      const headers = new Headers(init?.headers);
+      assertEquals(headers.get("Authorization"), "Bearer test-token");
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
     try {
-      const result = await fetchyb("https://example.com", "text", {
-        onError: false,
-        retry: false,
-      });
-      assertEquals(result, null);
+      await _main("https://example.com", { bearer: "test-token" }, undefined);
     } finally {
       mockFetch.restore();
     }
   });
-  await t.step("uses default auto type", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () =>
-        Promise.resolve(
-          new Response("Hello", {
-            status: 200,
-            headers: { "Content-Type": "text/plain" },
-          }),
-        ),
-    );
+
+  await t.step("handles JSON body correctly", async () => {
+    const testBody = { key: "value" };
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      assertEquals(init?.body, JSON.stringify(testBody));
+      const headers = new Headers(init?.headers);
+      assertEquals(headers.get("Content-Type"), "application/json");
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
     try {
-      const result = await fetchyb("https://example.com");
-      assertEquals(result, "Hello");
+      await _main("https://example.com", { body: testBody }, undefined);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("uses Request object as url", async () => {
+    const request = new Request("https://example.com", { method: "POST" });
+    const mockFetch = stub(globalThis, "fetch", (input, init) => {
+      assertEquals(input instanceof Request, true);
+      assertEquals(init?.method, "POST");
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
+    try {
+      await _main(request, undefined, undefined);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("handles URL object as url", async () => {
+    const url = new URL("https://example.com/path");
+    const mockFetch = stub(globalThis, "fetch", (input) => {
+      // Verify that signal is set
+      assertEquals(input instanceof URL, true);
+      assertEquals((input as URL).href, "https://example.com/path");
+      return Promise.resolve(new MockResponse(false, "", "OK", { status: 200 }));
+    });
+
+    try {
+      await _main(url, undefined, undefined);
     } finally {
       mockFetch.restore();
     }

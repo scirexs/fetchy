@@ -38,10 +38,10 @@ export interface FetchyOptions extends Omit<RequestInit, "body"> {
   retry?: RetryOptions | false;
   /** Bearer token for Authorization header. Automatically adds "Bearer " prefix. */
   bearer?: string;
-  /** Error throwing behavior configuration. Set to true to throw all errors. */
-  onError?: ErrorOptions | boolean;
   /** Initial jitter delay in seconds before sending the request. Adds randomness to prevent thundering herd. */
   delay?: number;
+  /** If receive response, does not throw error same with native fetch. */
+  native?: true;
 }
 
 /**
@@ -67,15 +67,4 @@ export interface RetryOptions {
   maxAttempts?: number;
   /** Whether to respect Retry-After header from response. Default is true. */
   retryAfter?: boolean;
-}
-
-/**
- * Configuration options for error throwing behavior.
- * Allows fine-grained control over which errors should be thrown vs. returned as null.
- */
-export interface ErrorOptions {
-  /** Whether to throw native errors (network errors, parsing errors, etc.). If false, returns null instead. Default is true. */
-  onNative?: boolean;
-  /** Whether to throw HTTPStatusError for non-OK status codes (4xx, 5xx, ...). Default is false. */
-  onStatus?: boolean;
 }

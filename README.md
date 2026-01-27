@@ -16,6 +16,7 @@ A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handli
 - **Bearer Token Helper** - Built-in Authorization header management
 - **Jitter Support** - Prevent thundering herd with randomized delays
 - **Automatic Body Parsing** - Automatic JSON serialization and Content-Type detection
+- **Fluent Interface** - Class-based API with both instance and static methods
 
 ## Installation
 
@@ -30,130 +31,190 @@ deno add jsr:@scirexs/fetchy
 ## Quick Start
 
 ```ts
-import { fetchy, fetchyb } from "@scirexs/fetchy";
+import { fetchy, sfetchy, Fetchy } from "@scirexs/fetchy";
 
-// Simple GET request with timeout
-const response = await fetchy("https://api.example.com/data", {
-  timeout: 10
-});
+// Simple GET request with timeout and retry
+const response = await fetchy("https://api.example.com/data");
 
-// Auto-parsed JSON response
+// Auto-parsed JSON response with safe error handling
 interface User {
   id: number;
   name: string;
 }
 
-const user = await fetchyb<User>("https://api.example.com/user/1", "json");
-console.log(user?.name);
+const user = await sfetchy<User>("https://api.example.com/user/1", { timeout: 10 }, "json");
+console.log(user.name);
+
+// Fluent API with reusable configuration
+const client = new Fetchy({
+  bearer: "token",
+  timeout: 10,
+  retry: { maxAttempts: 5 }
+});
+const data = await client.json<User>("https://api.example.com/user/1");
 ```
 
 ## API Reference
 
-### `fetchy(url, options?)`
+### `fetchy(url, options?, parse?)`
 
-Performs an HTTP request and returns the raw Response object.
+Performs an HTTP request with enhanced features. Throws errors on failure by default.
 
 #### Parameters
 
 - `url`: `string | URL | Request | null` - The request URL
 - `options`: `FetchyOptions` (optional) - Configuration options
+- `parse`: `"json" | "text" | "bytes" | "blob" | "buffer"` (optional) - Response parsing method
 
 #### Returns
 
-`Promise<Response>`; If `onError.onNative` is configured as `false`, returns `Promise<Response | null>`
+- Without `parse`: `Promise<Response>`
+- With `parse="json"`: `Promise<T>`
+- With `parse="text"`: `Promise<string>`
+- With `parse="bytes"`: `Promise<Uint8Array>`
+- With `parse="blob"`: `Promise<Blob>`
+- With `parse="buffer"`: `Promise<ArrayBuffer>`
 
 #### Example
 
 ```ts
-const response = await fetchy("https://api.example.com/data", {
-  method: "POST",
-  body: { key: "value" },
-  timeout: 10,
-  retry: { maxAttempts: 3, interval: 2 },
-  bearer: "your-token-here"
-});
+// Get Response object
+const response = await fetchy("https://api.example.com/data");
 
+// Direct JSON parsing
+const user = await fetchy<User>("https://api.example.com/user", {}, "json");
+
+// POST with automatic body serialization
+const result = await fetchy("https://api.example.com/create", {
+  body: { name: "John", age: 30 },
+  bearer: "token"
+}, "json");
+
+// Binary data
+const image = await fetchy("https://api.example.com/image.png", {}, "bytes");
+```
+
+### `sfetchy(url, options?, parse?)`
+
+Performs an HTTP request with safe error handling. Returns `null` on any failure instead of throwing.
+
+#### Parameters
+
+Same as `fetchy()`.
+
+#### Returns
+
+Same as `fetchy()` but with `| null` added to each return type.
+
+#### Example
+
+```ts
+// Returns null instead of throwing
+const data = await sfetchy("https://api.example.com/data", {}, "json");
+if (data === null) {
+  console.log("Request failed gracefully");
+}
+
+// Safe Response retrieval
+const response = await sfetchy("https://api.example.com/data");
 if (response?.ok) {
-  const data = await response.json();
+  const json = await response.json();
 }
 ```
 
-### `fetchyb(url, type?, options?)`
+### `Fetchy` Class
 
-Performs an HTTP request and automatically parses the response body.
+A fluent HTTP client class that provides both instance and static methods.
 
-#### Parameters
+#### Instance Methods
 
-- `url`: `string | URL | Request | null` - The request URL
-- `type`: `"text" | "json" | "bytes" | "auto"` (default: `"auto"`) - Response parsing type
-- `options`: `FetchyOptions` (optional) - Configuration options
+```ts
+const client = new Fetchy(options);
 
-#### Returns
+// Parsing methods
+await client.fetch(url?)     // Returns Response
+await client.json<T>(url?)   // Returns T
+await client.text(url?)      // Returns string
+await client.bytes(url?)     // Returns Uint8Array
+await client.blob(url?)      // Returns Blob
+await client.buffer(url?)    // Returns ArrayBuffer
+await client.safe(url?)      // Returns Response | null
+await client.sjson<T>(url?)  // Returns T | null
+await client.stext(url?)     // Returns string | null
+await client.sbytes(url?)    // Returns Uint8Array | null
+await client.sblob(url?)     // Returns Blob | null
+await client.sbuffer(url?)   // Returns ArrayBuffer | null
+```
 
-`Promise<T | string | Uint8Array>`; If `onError.onNative` is configured as `false`, returns `Promise<T | string | Uint8Array | null>`
+#### Static Methods
+
+```ts
+// Same methods available as static
+await Fetchy.fetch(url, options?)
+await Fetchy.json<T>(url, options?)
+await Fetchy.text(url, options?)
+await Fetchy.bytes(url, options?)
+await Fetchy.blob(url, options?)
+await Fetchy.buffer(url, options?)
+await Fetchy.safe(url, options?)
+await Fetchy.sjson<T>(url, options?)
+await Fetchy.stext(url, options?)
+await Fetchy.sbytes(url, options?)
+await Fetchy.sblob(url, options?)
+await Fetchy.sbuffer(url, options?)
+```
 
 #### Example
 
 ```ts
-// Automatic type detection from Content-Type header
-const data = await fetchyb("https://api.example.com/data");
+// Instance usage - reuse configuration
+const client = new Fetchy({
+  bearer: "token123",
+  timeout: 10,
+  retry: { maxAttempts: 3 }
+});
 
-// Explicit JSON parsing with type assertion
-interface Product {
-  id: number;
-  name: string;
-  price: number;
-}
-const product = await fetchyb<Product>("https://api.example.com/product/1", "json");
+const user = await client.json<User>("https://api.example.com/user");
+const posts = await client.json<Post[]>("https://api.example.com/posts");
 
-// Text content
-const html = await fetchyb("https://example.com", "text");
+// Static usage - one-off requests
+const data = await Fetchy.json("https://api.example.com/data");
 
-// Binary data
-const image = await fetchyb("https://example.com/image.png", "bytes");
+// Safe mode
+const result = await Fetchy.sjson("https://api.example.com/data");
 ```
 
 ## Configuration
 
-### API Options
-
-#### `FetchyOptions`
+### `FetchyOptions`
 
 ```ts
-interface FetchyOptions extends RequestInit {
-  // Standard fetch options (method, headers, etc.)
-  method?: string;
-  headers?: HeadersInit;
+interface FetchyOptions extends Omit<RequestInit, "body"> {
+  // Request URL (allows null url parameter with this option)
+  url?: string | URL;
   
   // Request body (auto-serializes JSON; ReadableStream is NOT supported)
-  // type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
   body?: JSONValue | FormData | URLSearchParams | Blob | ArrayBuffer | string;
   
-  // Timeout in seconds (default: 15)
-  timeout?: number;  // Set to 0 to disable timeout
+  // Timeout in seconds (default: 15, set to 0 to disable)
+  timeout?: number;
   
-  // Retry configuration
+  // Retry configuration (set to false to disable)
   retry?: {
-    maxAttempts?: number;  // Maximum retry attempts (default: 3)
-    interval?: number;     // Base interval in seconds (default: 3)
-    maxInterval?: number;  // Maximum interval cap in seconds (default: 30)
-    retryAfter?: boolean;  // Respect Retry-After header (default: true)
-  } | false;  // Set to false to disable retry
+    interval?: number;      // Base interval in seconds (default: 3)
+    maxInterval?: number;   // Maximum interval cap (default: 30)
+    maxAttempts?: number;   // Maximum retry attempts (default: 3)
+    retryAfter?: boolean;   // Respect Retry-After header (default: true)
+  } | false;
   
   // Bearer token (automatically adds "Bearer " prefix)
   bearer?: string;
   
-  // Error throwing behavior
-  onError?: {
-    onNative?: boolean;  // Throw on native errors (default: true)
-    onStatus?: boolean;  // Throw on 4xx/5xx status (default: true)
-  } | boolean;  // Set to true to throw on all errors
-  
-  // Initial jitter delay in seconds
+  // Initial jitter delay in seconds before request (default: 0)
   delay?: number;
-
-  // URL for fetch (allows reusing FetchyOptions as preset configuration)
-  url?: string | URL;
+  
+  // Use native fetch error behavior (no HTTPStatusError on 4xx/5xx)
+  native?: true;
 }
 ```
 
@@ -169,10 +230,7 @@ interface FetchyOptions extends RequestInit {
     maxInterval: 30,  // 30 seconds maximum interval
     retryAfter: true  // Respect Retry-After header
   },
-  onError: {
-    onNative: true,   // Throw native errors
-    onStatus: true   // Don't throw on HTTP errors
-  },
+  native: undefined   // Throws HTTPStatusError on non-OK status (4xx, 5xx)
 }
 ```
 
@@ -180,66 +238,111 @@ interface FetchyOptions extends RequestInit {
 
 #### Method
 
-If a body is provided without specifying a method, the method defaults to `"POST"`. When a Request object is passed as the `url` argument, its method is used.
+- If body is provided without method: defaults to `"POST"`
+- If Request object is passed: uses its method
+- Otherwise: defaults to `"GET"`
 
 #### Headers
 
 The following headers are automatically set if not specified:
 
 - **Accept**: `application/json, text/plain`
-- **Content-Type**: Automatically determined based on the body type:
-  - `string`, `URLSearchParams`, `FormData`, `Blob` with type: Not set by this package; [`fetch` will set it automatically](https://fetch.spec.whatwg.org/#concept-bodyinit-extract).
+- **Content-Type**: Automatically determined based on body type:
+  - `string`, `URLSearchParams`, `FormData`, `Blob` with type: Not set (native fetch handles it)
   - `JSONValue`: `application/json`
-  - `Blob` without type: `application/octet-stream`
-  - `ArrayBuffer`: `application/octet-stream` 
-- **Authorization**: Set to `Bearer ${options.bearer}` if `options.bearer` is provided.
+  - `Blob` without type, `ArrayBuffer`: `application/octet-stream`
+- **Authorization**: `Bearer ${options.bearer}` if bearer is provided
 
-**Note 1:** If you pass serialized JSON as the body (i.e., a string), Content-Type will be set to `text/plain;charset=UTF-8`. To ensure Content-Type is set to `application/json`, pass the JSON object directly instead of a serialized string.
-
-**Note 2:** If you pass a body through a Request object, Content-Type will NOT be set automatically by this package.
+**Note:** If you pass a body through a Request object, Content-Type is NOT set automatically by this package.
 
 ## Error Handling
 
-### Timeout
-
-If the timeout duration specified in the `timeout` option is exceeded, the request is aborted using the standard `AbortSignal.timeout()` method. Note that there is no specific error class for timeout errors; they will be thrown as standard `AbortError`s.
-
 ### HTTPStatusError
 
-If `onStatus` is set to `true` (default), an `HTTPStatusError` will be thrown when the response status is outside the 2xx range. You can access the status and body through this error object. The error message format is: `404 Not Found: (no response body)`.
+Thrown when response status is not OK (4xx, 5xx) unless `native: true` is set.
+
+```ts
+try {
+  await fetchy("https://api.example.com/data");
+} catch (error) {
+  if (error instanceof HTTPStatusError) {
+    console.error(error.status);   // 404
+    console.error(error.body);     // Response body text
+    console.error(error.message);  // "404 Not Found: (no response body)"
+  }
+}
+```
 
 ### RedirectError
 
-If `redirect` is set to `"error"`, a `RedirectError` will be thrown when the response status is in the 3xx range. You can access the status through this error object. The error message format is: `301 Moved Permanently`.
+Thrown when `redirect: "error"` is set and a redirect response (3xx) is received.
 
-### Other Errors
+```ts
+try {
+  await fetchy("https://example.com/redirect", {
+    redirect: "error"
+  });
+} catch (error) {
+  if (error instanceof RedirectError) {
+    console.error(error.status);   // 301
+    console.error(error.message);  // "301 Moved Permanently"
+  }
+}
+```
 
-If the `onNative` option is set to `true`, any other errors that occur will be thrown directly.
+### Native Errors
+
+Other errors (network failures, timeout, abort) are thrown as standard errors:
+- `TypeError`: Network error, DNS resolution failure
+- `DOMException`: Timeout or abort via AbortSignal
+
+### Safe Error Handling
+
+Use `sfetchy()` or `Fetchy.safe()` to return `null` instead of throwing:
+
+```ts
+const data = await sfetchy("https://api.example.com/data", {}, "json");
+if (data === null) {
+  // Handle error gracefully
+}
+```
+
+### Native Mode
+
+Set `native: true` to disable HTTPStatusError and get native fetch behavior:
+
+```ts
+const response = await fetchy("https://api.example.com/data", {
+  native: true
+});
+// Returns Response even for 4xx/5xx status codes
+```
 
 ## Usage Examples
 
 ### Basic Requests
 
 ```ts
-import { fetchy, fetchyb } from "@scirexs/fetchy";
+import { fetchy, sfetchy } from "@scirexs/fetchy";
 
-// GET request
-const data = await fetchyb("https://api.example.com/data", "json");
+// GET with automatic JSON parsing
+const data = await fetchy<User[]>("https://api.example.com/users", {}, "json");
 
 // POST with JSON body
-const result = await fetchyb("https://api.example.com/create", "json", {
+const result = await fetchy("https://api.example.com/create", {
   body: { name: "John", email: "john@example.com" }
-});
+}, "json");
 
 // Custom headers
 const response = await fetchy("https://api.example.com/data", {
-  headers: {
-    "X-Custom-Header": "value"
-  }
+  headers: { "X-Custom-Header": "value" }
 });
 
-// Reuse options as preset configuration (avoids Request object limitations)
-const options = { url: "https://api.example.com/data", retry: false };
+// Reuse options as preset configuration
+const options: FetchyOptions = {
+  url: "https://api.example.com/data",
+  retry: false
+};
 await fetchy(null, options);
 await fetchy(null, options);
 ```
@@ -248,16 +351,14 @@ await fetchy(null, options);
 
 ```ts
 // Bearer token authentication
-const user = await fetchyb<User>("https://api.example.com/me", "json", {
+const user = await fetchy<User>("https://api.example.com/me", {
   bearer: "your-access-token"
-});
+}, "json");
 
 // Custom authorization
-const data = await fetchyb("https://api.example.com/data", "json", {
-  headers: {
-    "Authorization": "Basic " + btoa("user:pass")
-  }
-});
+const data = await fetchy("https://api.example.com/data", {
+  headers: { "Authorization": "Basic " + btoa("user:pass") }
+}, "json");
 ```
 
 ### Timeout and Retry
@@ -269,15 +370,15 @@ const response = await fetchy("https://slow-api.example.com", {
 });
 
 // Retry with exponential backoff
-// Retry intervals: 1s, 3s (3^1), 9s (3^2), 27s (3^3), 60s (capped at maxInterval)
-const data = await fetchyb("https://api.example.com/data", "json", {
+// Intervals: 1s (3^0), 3s (3^1), 9s (3^2), 27s (3^3), capped at maxInterval
+const data = await fetchy("https://api.example.com/data", {
   retry: {
-    maxAttempts: 5,   // Retry up to 5 times
-    interval: 3,      // Base interval for exponential backoff (interval^n)
-    maxInterval: 60,  // Cap at 60 seconds
-    retryAfter: true  // Respect Retry-After header
+    maxAttempts: 5,
+    interval: 3,
+    maxInterval: 60,
+    retryAfter: true
   }
-});
+}, "json");
 
 // Disable retry
 const response = await fetchy("https://api.example.com/data", {
@@ -285,92 +386,112 @@ const response = await fetchy("https://api.example.com/data", {
 });
 ```
 
-### Error Handling
+### Error Handling Patterns
 
 ```ts
-import { fetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
+import { fetchy, sfetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
 
-// Throw on error and not ok response (default behavior)
+// Default: throws on error
 try {
-  const response = await fetchy("https://api.example.com/data");
+  const data = await fetchy("https://api.example.com/data", {}, "json");
 } catch (error) {
   if (error instanceof HTTPStatusError) {
-    console.error("HTTP error:", error.message);  // e.g., "404 Not Found: (no response body)"
-    console.error("Status:", error.status);
-    console.error("Body:", error.body);
+    console.error(`HTTP ${error.status}: ${error.body}`);
   }
 }
 
-// Return null on error
+// Safe mode: returns null
+const data = await sfetchy("https://api.example.com/data", {}, "json");
+if (data === null) {
+  console.log("Request failed, using default");
+}
+
+// Native mode: no HTTPStatusError
 const response = await fetchy("https://api.example.com/data", {
-  onError: false,
+  native: true
 });
-if (response === null) {
-  console.log("Request failed");
+if (!response.ok) {
+  console.error("Request failed with status", response.status);
+}
+```
+
+### Fluent API
+
+```ts
+// Create reusable client
+const api = new Fetchy({
+  url: "https://api.example.com",
+  bearer: "token",
+  timeout: 10,
+  retry: { maxAttempts: 3 }
+});
+
+// Instance methods
+const users = await api.json<User[]>("/users");
+const post = await api.json<Post>("/posts/1");
+const text = await api.text("/readme.txt");
+
+// Safe methods
+const data = await api.sjson("/maybe-fails");
+if (data !== null) {
+  // Process data
 }
 
-// Throw only on native errors
-try {
-  const response = await fetchy("https://api.example.com/data", {
-    onError: { onNative: true, onStatus: false } as const
-  });
-} catch (error) {
-  console.error("Request failed:", error);
-}
-
-// Handle redirects
-try {
-  const response = await fetchy("https://example.com/redirect", {
-    redirect: "error"
-  });
-} catch (error) {
-  if (error instanceof RedirectError) {
-    console.error("Unexpected redirect:", error.message);
-    console.error("Status:", error.status);
-  }
-}
+// Static methods for one-off requests
+const response = await Fetchy.fetch("https://example.com");
+const json = await Fetchy.json("https://api.example.com/data");
 ```
 
 ### Advanced Usage
 
+#### Jitter and Delays
 ```ts
 // Jitter to prevent thundering herd
 const response = await fetchy("https://api.example.com/data", {
-  delay: 2,  // Random delay up to 2 seconds before request
+  delay: 2,  // Random delay up to 2 seconds
   retry: { maxAttempts: 3 }
 });
+```
 
+#### Abort Signals
+```ts
 // Combined abort signals
-const controller1 = new AbortController();
-const controller2 = new AbortController();
+const controller = new AbortController();
 const request = new Request("https://api.example.com/data", {
-  signal: controller1.signal
+  signal: controller.signal
 });
 
-setTimeout(() => controller1.abort(), 5000);  // Abort after 5 seconds
+setTimeout(() => controller.abort(), 5000);
 
 const response = await fetchy(request, {
-  signal: controller2.signal
+  signal: AbortSignal.timeout(10000)
 });
+```
 
+#### Form Data
+```ts
 // Form data upload
 const formData = new FormData();
 formData.append("file", blob);
 formData.append("name", "example");
 
-const response = await fetchy("https://api.example.com/upload", {
+await fetchy("https://api.example.com/upload", {
   body: formData
 });
 
 // URL-encoded form
-const params = new URLSearchParams();
-params.append("key", "value");
-
-const response = await fetchy("https://api.example.com/form", {
+const params = new URLSearchParams({ key: "value" });
+await fetchy("https://api.example.com/form", {
   body: params
 });
+```
 
-// Force no retries for specific error messages during testing
+#### Testing Utilities
+
+When writing tests for code that uses `fetchy`, you may need to simulate immediate failures without triggering retry logic. Use the `NO_RETRY_ERROR` constant to bypass all retry attempts:
+```ts
+import { fetchy, NO_RETRY_ERROR } from "@scirexs/fetchy";
+
 const originalFetch = globalThis.fetch;
 globalThis.fetch = () => Promise.reject(new Error(NO_RETRY_ERROR));
 
@@ -399,8 +520,9 @@ interface Todo {
   completed: boolean;
 }
 
-const response = await fetchyb<ApiResponse<Todo>>(
+const response = await fetchy<ApiResponse<Todo>>(
   "https://api.example.com/todos/1",
+  {},
   "json"
 );
 
@@ -411,26 +533,21 @@ if (response.success) {
 
 ## Limitations
 
-### Return Type Inference
-
-When setting the `onError` property in `FetchyOptions`, the return type will include `null` even if you set it to `true` or `{ onNative: true }`. To prevent this and ensure a non-nullable return type, add `as const` to the `onError` property value:
-
-```ts
-interface User {
-  id: number;
-  name: string;
-}
-
-const options = { timeout: 5, onError: { onNative: true, onStatus: false } as const };  // Add `as const`
-const response = await fetchy("https://api.example.com/todos/1", "json", options);
-// `response` is User (not User | null)
-```
-
 ### Content-Type Header with Request Objects
 
-When a body is set in a Request object, the Content-Type header is NOT set automatically by this package. Therefore, when using Request objects, you must explicitly set the Content-Type header for any body types other than those automatically handled by the native `fetch` API.
+When a body is set in a Request object, the Content-Type header is NOT set automatically by this package. Use the `url` property in `FetchyOptions` instead to benefit from automatic header configuration:
 
-This limitation can be avoided by using the `url` property in `FetchyOptions` instead of Request objects. This approach allows you to benefit from all automatic header configuration features while still maintaining reusable preset configurations. See the "Reuse options as preset configuration" example in the [Basic Requests](#basic-requests) section.
+```ts
+// Instead of this:
+const request = new Request("https://api.example.com", { body: jsonData });
+await fetchy(request);
+
+// Do this:
+await fetchy(null, {
+  url: "https://api.example.com",
+  body: jsonData
+});
+```
 
 ### ReadableStream as Body
 
@@ -438,7 +555,7 @@ This limitation can be avoided by using the `url` property in `FetchyOptions` in
 
 ### Redirect Error Handling
 
-When `redirect` is set to `"error"`, this package throws a custom `RedirectError` (instead of the native TypeError) to enable proper retry handling for redirect responses.
+When `redirect` is set to `"error"`, this package throws a custom `RedirectError` (instead of native TypeError) to enable proper retry handling for redirect responses.
 
 ## License
 
