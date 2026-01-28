@@ -25,8 +25,8 @@ export {
   _shouldNotRetry,
   _shouldRedirect,
   _wait,
-  Fetchy,
   fetchy,
+  fy,
   HTTPStatusError,
   NO_RETRY_ERROR,
   RedirectError,
@@ -166,7 +166,7 @@ class RedirectError extends Error {
  * }
  * ```
  */
-class Fetchy implements FetchyOptions {
+class fy implements FetchyOptions {
   /** Request URL. Used if call fetchy with null. */
   url?: string | URL;
   /** Request body content. Automatically serializes JSON objects. */

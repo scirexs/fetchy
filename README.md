@@ -31,7 +31,7 @@ deno add jsr:@scirexs/fetchy
 ## Quick Start
 
 ```ts
-import { fetchy, sfetchy, Fetchy } from "@scirexs/fetchy";
+import { fetchy, sfetchy, fy } from "@scirexs/fetchy";
 
 // Simple GET request with timeout and retry
 const response = await fetchy("https://api.example.com/data");
@@ -46,7 +46,7 @@ const user = await sfetchy<User>("https://api.example.com/user/1", { timeout: 10
 console.log(user.name);
 
 // Fluent API with reusable configuration
-const client = new Fetchy({
+const client = new fy({
   bearer: "token",
   timeout: 10,
   retry: { maxAttempts: 5 }
@@ -122,14 +122,14 @@ if (response?.ok) {
 }
 ```
 
-### `Fetchy` Class
+### `fy` Class
 
 A fluent HTTP client class that provides both instance and static methods.
 
 #### Instance Methods
 
 ```ts
-const client = new Fetchy(options);
+const client = new fy(options);
 
 // Parsing methods
 await client.fetch(url?)     // Returns Response
@@ -150,25 +150,25 @@ await client.sbuffer(url?)   // Returns ArrayBuffer | null
 
 ```ts
 // Same methods available as static
-await Fetchy.fetch(url, options?)
-await Fetchy.json<T>(url, options?)
-await Fetchy.text(url, options?)
-await Fetchy.bytes(url, options?)
-await Fetchy.blob(url, options?)
-await Fetchy.buffer(url, options?)
-await Fetchy.safe(url, options?)
-await Fetchy.sjson<T>(url, options?)
-await Fetchy.stext(url, options?)
-await Fetchy.sbytes(url, options?)
-await Fetchy.sblob(url, options?)
-await Fetchy.sbuffer(url, options?)
+await fy.fetch(url, options?)
+await fy.json<T>(url, options?)
+await fy.text(url, options?)
+await fy.bytes(url, options?)
+await fy.blob(url, options?)
+await fy.buffer(url, options?)
+await fy.safe(url, options?)
+await fy.sjson<T>(url, options?)
+await fy.stext(url, options?)
+await fy.sbytes(url, options?)
+await fy.sblob(url, options?)
+await fy.sbuffer(url, options?)
 ```
 
 #### Example
 
 ```ts
 // Instance usage - reuse configuration
-const client = new Fetchy({
+const client = new fy({
   bearer: "token123",
   timeout: 10,
   retry: { maxAttempts: 3 }
@@ -178,10 +178,10 @@ const user = await client.json<User>("https://api.example.com/user");
 const posts = await client.json<Post[]>("https://api.example.com/posts");
 
 // Static usage - one-off requests
-const data = await Fetchy.json("https://api.example.com/data");
+const data = await fy.json("https://api.example.com/data");
 
 // Safe mode
-const result = await Fetchy.sjson("https://api.example.com/data");
+const result = await fy.sjson("https://api.example.com/data");
 ```
 
 ## Configuration
@@ -298,7 +298,7 @@ Other errors (network failures, timeout, abort) are thrown as standard errors:
 
 ### Safe Error Handling
 
-Use `sfetchy()` or `Fetchy.safe()` to return `null` instead of throwing:
+Use `sfetchy()` or `fy.safe()` to return `null` instead of throwing:
 
 ```ts
 const data = await sfetchy("https://api.example.com/data", {}, "json");
@@ -419,7 +419,7 @@ if (!response.ok) {
 
 ```ts
 // Create reusable client
-const api = new Fetchy({
+const api = new fy({
   url: "https://api.example.com",
   bearer: "token",
   timeout: 10,
@@ -438,8 +438,8 @@ if (data !== null) {
 }
 
 // Static methods for one-off requests
-const response = await Fetchy.fetch("https://example.com");
-const json = await Fetchy.json("https://api.example.com/data");
+const response = await fy.fetch("https://example.com");
+const json = await fy.json("https://api.example.com/data");
 ```
 
 ### Advanced Usage
