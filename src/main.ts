@@ -53,9 +53,9 @@ const _DEFAULT: Options = {
 /*=============== Internal Types ================*/
 /** Valid input types for fetch requests. */
 type Input = string | URL | Request;
-type FetchyReturn<T> = Response | string | Uint8Array<ArrayBuffer> | Blob | ArrayBuffer | T;
+type FetchyReturn<T> = Response | string | Uint8Array<ArrayBuffer> | Blob | ArrayBuffer | FormData | T;
 /** Response body parsing method specification. */
-type ParseMethod = "text" | "json" | "bytes" | "blob" | "buffer";
+type ParseMethod = "text" | "json" | "bytes" | "blob" | "buffer" | "form";
 /** Internal normalized options used throughout the fetch process. */
 interface Options {
   timeout: number;
@@ -208,6 +208,10 @@ class fy implements FetchyOptions {
   async buffer(url?: Input | null): Promise<ArrayBuffer> {
     return await fetchy(url ?? null, this, "buffer");
   }
+  /** Call fetchy with instance options and parsing as FormData. */
+  async form(url?: Input | null): Promise<FormData> {
+    return await fetchy(url ?? null, this, "form");
+  }
   /** Call sfetchy with instance options. */
   async safe(url?: Input | null): Promise<Response | null> {
     return await sfetchy(url ?? null, this);
@@ -231,6 +235,10 @@ class fy implements FetchyOptions {
   /** Call sfetchy with instance options and parsing as ArrayBuffer. */
   async sbuffer(url?: Input | null): Promise<ArrayBuffer | null> {
     return await fetchy(url ?? null, this, "buffer");
+  }
+  /** Call fetchy with instance options and parsing as FormData. */
+  async sform(url?: Input | null): Promise<FormData | null> {
+    return await sfetchy(url ?? null, this, "form");
   }
 
   /** Call fetchy. */
@@ -257,6 +265,10 @@ class fy implements FetchyOptions {
   static async buffer(url: Input | null, options?: FetchyOptions): Promise<ArrayBuffer> {
     return await fetchy(url, options, "buffer");
   }
+  /** Call fetchy with parsing as FormData. */
+  static async form(url: Input | null, options?: FetchyOptions): Promise<FormData> {
+    return await fetchy(url, options, "form");
+  }
   /** Call sfetchy. */
   static async safe(url: Input | null, options?: FetchyOptions): Promise<Response | null> {
     return await sfetchy(url, options);
@@ -280,6 +292,10 @@ class fy implements FetchyOptions {
   /** Call sfetchy with parsing as ArrayBuffer. */
   static async sbuffer(url: Input | null, options?: FetchyOptions): Promise<ArrayBuffer | null> {
     return await sfetchy(url, options, "buffer");
+  }
+  /** Call fetchy with parsing as FormData. */
+  static async sform(url: Input | null, options?: FetchyOptions): Promise<FormData | null> {
+    return await sfetchy(url, options, "form");
   }
 }
 /**
@@ -333,6 +349,7 @@ async function sfetchy(url: Input | null, options: FetchyOptions | undefined, pa
 async function sfetchy(url: Input | null, options: FetchyOptions | undefined, parse: "bytes"): Promise<Uint8Array<ArrayBuffer> | null>;
 async function sfetchy(url: Input | null, options: FetchyOptions | undefined, parse: "blob"): Promise<Blob | null>;
 async function sfetchy(url: Input | null, options: FetchyOptions | undefined, parse: "buffer"): Promise<ArrayBuffer | null>;
+async function sfetchy(url: Input | null, options: FetchyOptions | undefined, parse: "form"): Promise<FormData | null>;
 async function sfetchy<T>(url: Input | null, options?: FetchyOptions, parse?: ParseMethod): Promise<FetchyReturn<T> | null> {
   try {
     return await _main<T>(url, options, parse);
@@ -400,6 +417,7 @@ async function fetchy(url: Input | null, options: FetchyOptions | undefined, par
 async function fetchy(url: Input | null, options: FetchyOptions | undefined, parse: "bytes"): Promise<Uint8Array<ArrayBuffer>>;
 async function fetchy(url: Input | null, options: FetchyOptions | undefined, parse: "blob"): Promise<Blob>;
 async function fetchy(url: Input | null, options: FetchyOptions | undefined, parse: "buffer"): Promise<ArrayBuffer>;
+async function fetchy(url: Input | null, options: FetchyOptions | undefined, parse: "form"): Promise<FormData>;
 async function fetchy<T>(url: Input | null, options?: FetchyOptions, parse?: ParseMethod): Promise<FetchyReturn<T>> {
   try {
     return await _main<T>(url, options, parse);
@@ -516,6 +534,7 @@ async function _parseBody<T>(resp: Response, method: ParseMethod): Promise<Exclu
     case "bytes": return await resp.bytes();
     case "blob": return await resp.blob();
     case "buffer": return await resp.arrayBuffer();
+    case "form": return await resp.formData();
   }
 }
 

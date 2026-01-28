@@ -761,6 +761,16 @@ Deno.test("_parseBody", async (t) => {
     assertEquals(result instanceof ArrayBuffer, true);
     assertEquals(new TextDecoder().decode(result), mockText);
   });
+
+  await t.step("parses form response correctly", async () => {
+    const mockData = new FormData();
+    mockData.append("test", "test data");
+    const response = new Response(mockData);
+
+    const result = await _parseBody(response, "form") as FormData;
+    assertEquals(result instanceof FormData, true);
+    assertEquals(result.get("test"), mockData.get("test"));
+  });
 });
 
 Deno.test("_wait", async (t) => {

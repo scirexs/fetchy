@@ -64,7 +64,7 @@ Performs an HTTP request with enhanced features. Throws errors on failure by def
 
 - `url`: `string | URL | Request | null` - The request URL
 - `options`: `FetchyOptions` (optional) - Configuration options
-- `parse`: `"json" | "text" | "bytes" | "blob" | "buffer"` (optional) - Response parsing method
+- `parse`: `"json" | "text" | "bytes" | "blob" | "buffer" | "form"` (optional) - Response parsing method
 
 #### Returns
 
@@ -74,6 +74,7 @@ Performs an HTTP request with enhanced features. Throws errors on failure by def
 - With `parse="bytes"`: `Promise<Uint8Array>`
 - With `parse="blob"`: `Promise<Blob>`
 - With `parse="buffer"`: `Promise<ArrayBuffer>`
+- With `parse="form"`: `Promise<FormData>`
 
 #### Example
 
@@ -138,12 +139,14 @@ await client.text(url?)      // Returns string
 await client.bytes(url?)     // Returns Uint8Array
 await client.blob(url?)      // Returns Blob
 await client.buffer(url?)    // Returns ArrayBuffer
+await client.form(url?)      // Returns FormData
 await client.safe(url?)      // Returns Response | null
 await client.sjson<T>(url?)  // Returns T | null
 await client.stext(url?)     // Returns string | null
 await client.sbytes(url?)    // Returns Uint8Array | null
 await client.sblob(url?)     // Returns Blob | null
 await client.sbuffer(url?)   // Returns ArrayBuffer | null
+await client.sform(url?)     // Returns FormData
 ```
 
 #### Static Methods
@@ -156,12 +159,14 @@ await fy.text(url, options?)
 await fy.bytes(url, options?)
 await fy.blob(url, options?)
 await fy.buffer(url, options?)
+await fy.form(url, options?)
 await fy.safe(url, options?)
 await fy.sjson<T>(url, options?)
 await fy.stext(url, options?)
 await fy.sbytes(url, options?)
 await fy.sblob(url, options?)
 await fy.sbuffer(url, options?)
+await fy.sform(url, options?)
 ```
 
 #### Example
