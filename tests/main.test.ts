@@ -21,6 +21,7 @@ import {
   _getOptions,
   _getRequestInit,
   _getRetryOption,
+  _handleByNative,
   _handleRedirectResponse,
   _isBool,
   _isJSONObject,
@@ -424,6 +425,40 @@ Deno.test("_getContentType", async (t) => {
 
   await t.step("ArrayBuffer body", () => {
     assertEquals(_getContentType(new ArrayBuffer(8)), "application/octet-stream");
+  });
+});
+
+Deno.test("_handleByNative", async (t) => {
+  await t.step("undefined body", () => {
+    assertEquals(_handleByNative(undefined), true);
+  });
+
+  await t.step("FormData body", () => { // fetch will be set `multipart/form-data; boundary=`
+    assertEquals(_handleByNative(new FormData()), true);
+  });
+
+  await t.step("string body", () => { // fetch will be set `text/plain;charset=UTF-8`
+    assertEquals(_handleByNative("text"), true);
+  });
+
+  await t.step("URLSearchParams body", () => { // fetch will be set `application/x-www-form-urlencoded;charset=UTF-8`
+    assertEquals(_handleByNative(new URLSearchParams()), true);
+  });
+
+  await t.step("JSON object body", () => {
+    assertEquals(_handleByNative({ key: "value" }), false);
+    assertEquals(_handleByNative([1, 2, 3]), false);
+    assertEquals(_handleByNative(true), false);
+    assertEquals(_handleByNative(123), false);
+  });
+
+  await t.step("Blob body", () => { // fetch will be set it's type, if exists
+    assertEquals(_handleByNative(new Blob(["data"])), false);
+    assertEquals(_handleByNative(new Blob(["data"], { type: "image/avif" })), true);
+  });
+
+  await t.step("ArrayBuffer body", () => {
+    assertEquals(_handleByNative(new ArrayBuffer(8)), false);
   });
 });
 

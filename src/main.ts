@@ -12,6 +12,7 @@ export {
   _getOptions,
   _getRequestInit,
   _getRetryOption,
+  _handleByNative,
   _handleRedirectResponse,
   _isBool,
   _isJSONObject,
@@ -505,17 +506,20 @@ function _getHeaders(options?: FetchyOptions): Headers {
   if (!headers.has("Accept")) headers.set("Accept", "application/json, text/plain");
   if (!headers.has("Content-Type")) {
     const type = _getContentType(options?.body);
-    if (type) headers.append("Content-Type", type);
+    if (type) headers.set("Content-Type", type);
   }
   if (options?.bearer) headers.set("Authorization", `Bearer ${options.bearer}`);
   return headers;
 }
 /** Determines Content-Type header based on body type. */
-function _getContentType(body?: FetchyBody): string | undefined {
-  if (body == void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams) return;
-  if (body instanceof Blob && body.type) return;
+function _getContentType(body?: FetchyBody): string {
   if (_isJSONObject(body)) return "application/json";
-  return "application/octet-stream";
+  return _handleByNative(body) ? "" : "application/octet-stream";
+}
+/** Checks Content-Type header should be handled by native fetch. */
+function _handleByNative(body?: FetchyBody): boolean {
+  return body == void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams ||
+    !!(body instanceof Blob && body.type);
 }
 /** Combine abort signals. */
 function _combineSignal(url: Input, timeout: number, signal?: AbortSignal | null): AbortSignal | undefined {
