@@ -497,7 +497,7 @@ function _getBody(body: FetchyBody): BodyInit | undefined {
 }
 /** Checks if a value should be treated as JSON object for serialization. */
 function _isJSONObject(arg?: FetchyBody): boolean {
-  return Boolean(arg === null || _isNumber(arg) || _isBool(arg) || Array.isArray(arg) || _isPlainObject(arg));
+  return Boolean(_isNumber(arg) || _isBool(arg) || Array.isArray(arg) || _isPlainObject(arg));
 }
 /** Constructs request headers with automatic Content-Type and Authorization. */
 function _getHeaders(options?: FetchyOptions): Headers {

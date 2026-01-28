@@ -328,10 +328,6 @@ Deno.test("_getOptions", async (t) => {
 });
 
 Deno.test("_isJSONObject", async (t) => {
-  await t.step("returns true for null", () => {
-    assertEquals(_isJSONObject(null), true);
-  });
-
   await t.step("returns true for number", () => {
     assertEquals(_isJSONObject(123), true);
     assertEquals(_isJSONObject(0), true);
@@ -350,6 +346,10 @@ Deno.test("_isJSONObject", async (t) => {
   await t.step("returns true for plain object", () => {
     assertEquals(_isJSONObject({}), true);
     assertEquals(_isJSONObject({ key: "value" }), true);
+  });
+
+  await t.step("returns false for null", () => {
+    assertEquals(_isJSONObject(null), false);
   });
 
   await t.step("returns false for string", () => {

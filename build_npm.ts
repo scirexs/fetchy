@@ -57,7 +57,7 @@ await build({
 function removeInternals(path: string) {
   const content = Deno.readTextFileSync(path);
   const lines = content.split("\n");
-  lines[0] = "export { Fetchy, fetchy, HTTPStatusError, NO_RETRY_ERROR, RedirectError, sfetchy };"
+  lines[0] = "export { fetchy, fy, HTTPStatusError, NO_RETRY_ERROR, RedirectError, sfetchy };"
   Deno.writeTextFileSync(path, lines.join("\n"));
 }
 
