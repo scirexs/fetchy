@@ -8,18 +8,18 @@ A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handli
 
 ## Features
 
-- **Lightweight** - Bundle size is ~6KB uncompressed, ~3KB gzipped, zero dependencies
+- **Lightweight** - Bundle size is ~5KB uncompressed, ~2KB gzipped, zero dependencies
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
+- **Promise-like Interface** - Chain parsing methods directly on fetch results
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
 - **Retry Logic** - Exponential backoff with Retry-After header support
 - **Type-Safe** - Full TypeScript support with generic type inference
 - **Bearer Token Helper** - Built-in Authorization header management
 - **Jitter Support** - Prevent thundering herd with randomized delays
-- **Automatic Body Parsing** - Automatic JSON serialization and Content-Type detection
 - **Fluent Interface** - Class-based API with both instance and static methods
+- **HTTP Method Shortcuts** - Convenient methods for GET, POST, PUT, PATCH, DELETE
 
 ## Installation
-
 ```bash
 # npm
 npm install @scirexs/fetchy
@@ -29,73 +29,69 @@ deno add jsr:@scirexs/fetchy
 ```
 
 ## Quick Start
-
 ```ts
-import { fetchy, sfetchy, fy } from "@scirexs/fetchy";
+import { fetchy, sfetchy, Fetchy, fy } from "@scirexs/fetchy";
 
-// Simple GET request with timeout and retry
-const response = await fetchy("https://api.example.com/data");
+// Simple GET request with automatic JSON parsing
+const user = await fetchy("https://api.example.com/user/1").json<User>();
 
-// Auto-parsed JSON response with safe error handling
-interface User {
-  id: number;
-  name: string;
+// Safe error handling - returns null on failure
+const data = await sfetchy("https://api.example.com/data").json<Data>();
+if (data !== null) {
+  console.log(data);
 }
 
-const user = await sfetchy<User>("https://api.example.com/user/1", { timeout: 10 }, "json");
-console.log(user.name);
-
 // Fluent API with reusable configuration
-const client = new fy({
+const client = fy({
   bearer: "token",
   timeout: 10,
   retry: { maxAttempts: 5 }
 });
-const data = await client.json<User>("https://api.example.com/user/1");
+const posts = await client.get("/posts").json<Post[]>();
 ```
 
 ## API Reference
 
-### `fetchy(url, options?, parse?)`
+### `fetchy(url?, options?)`
 
-Performs an HTTP request with enhanced features. Throws errors on failure by default.
+Performs an HTTP request with enhanced features. Returns a promise-like object that can be awaited directly or chained with parsing methods.
 
 #### Parameters
 
-- `url`: `string | URL | Request | null` - The request URL
+- `url`: `string | URL | Request | null` - The request URL (can be null if `options.url` is provided)
 - `options`: `FetchyOptions` (optional) - Configuration options
-- `parse`: `"json" | "text" | "bytes" | "blob" | "buffer" | "form"` (optional) - Response parsing method
 
 #### Returns
 
-- Without `parse`: `Promise<Response>`
-- With `parse="json"`: `Promise<T>`
-- With `parse="text"`: `Promise<string>`
-- With `parse="bytes"`: `Promise<Uint8Array>`
-- With `parse="blob"`: `Promise<Blob>`
-- With `parse="buffer"`: `Promise<ArrayBuffer>`
-- With `parse="form"`: `Promise<FormData>`
+`FetchyResponse` - A promise-like object that extends `Promise<Response>` with the following methods:
+
+- `text()` → `Promise<string>` - Parse response as text
+- `json<T>()` → `Promise<T>` - Parse response as JSON
+- `bytes()` → `Promise<Uint8Array>` - Parse response as byte array
+- `blob()` → `Promise<Blob>` - Parse response as Blob
+- `arrayBuffer()` → `Promise<ArrayBuffer>` - Parse response as ArrayBuffer
+- `formData()` → `Promise<FormData>` - Parse response as FormData
 
 #### Example
-
 ```ts
 // Get Response object
 const response = await fetchy("https://api.example.com/data");
 
-// Direct JSON parsing
-const user = await fetchy<User>("https://api.example.com/user", {}, "json");
+// Chain JSON parsing
+const user = await fetchy("https://api.example.com/user").json<User>();
 
 // POST with automatic body serialization
 const result = await fetchy("https://api.example.com/create", {
+  method: "POST",
   body: { name: "John", age: 30 },
   bearer: "token"
-}, "json");
+}).json();
 
 // Binary data
-const image = await fetchy("https://api.example.com/image.png", {}, "bytes");
+const image = await fetchy("https://api.example.com/image.png").bytes();
 ```
 
-### `sfetchy(url, options?, parse?)`
+### `sfetchy(url?, options?)`
 
 Performs an HTTP request with safe error handling. Returns `null` on any failure instead of throwing.
 
@@ -105,137 +101,174 @@ Same as `fetchy()`.
 
 #### Returns
 
-Same as `fetchy()` but with `| null` added to each return type.
+`FetchySafeResponse` - A promise-like object that extends `Promise<Response | null>` with the same parsing methods as `FetchyResponse`.
+
+- `text()` → `Promise<string | null>` - Safe text parsing (returns null on error)
+- `json<T>()` → `Promise<T | null>` - Safe JSON parsing (returns null on error)
+- `bytes()` → `Promise<Uint8Array | null>` - Safe bytes parsing
+- `blob()` → `Promise<Blob | null>` - Safe blob parsing
+- `arrayBuffer()` → `Promise<ArrayBuffer | null>` - Safe buffer parsing
+- `formData()` → `Promise<FormData | null>` - Safe form data parsing
 
 #### Example
-
 ```ts
-// Returns null instead of throwing
-const data = await sfetchy("https://api.example.com/data", {}, "json");
-if (data === null) {
+// Returns null instead of throwing on error
+const response = await sfetchy("https://api.example.com/data");
+if (response === null) {
   console.log("Request failed gracefully");
+} else {
+  const data = await response.json();
 }
 
-// Safe Response retrieval
-const response = await sfetchy("https://api.example.com/data");
-if (response?.ok) {
-  const json = await response.json();
+// Safe parsing still available
+const data = await sfetchy("https://api.example.com/data").json<Data>();
+if (data !== null) {
+  // Handle successful response
 }
 ```
 
-### `fy` Class
+### `Fetchy` Class
 
-A fluent HTTP client class that provides both instance and static methods.
+A fluent HTTP client class that provides instance methods.
+
+#### Constructor
+```ts
+const client = new Fetchy(options?: FetchyOptions);
+```
 
 #### Instance Methods
-
 ```ts
-const client = new fy(options);
+const client = new Fetchy(options);
 
-// Parsing methods
-await client.fetch(url?)     // Returns Response
-await client.json<T>(url?)   // Returns T
-await client.text(url?)      // Returns string
-await client.bytes(url?)     // Returns Uint8Array
-await client.blob(url?)      // Returns Blob
-await client.buffer(url?)    // Returns ArrayBuffer
-await client.form(url?)      // Returns FormData
-await client.safe(url?)      // Returns Response | null
-await client.sjson<T>(url?)  // Returns T | null
-await client.stext(url?)     // Returns string | null
-await client.sbytes(url?)    // Returns Uint8Array | null
-await client.sblob(url?)     // Returns Blob | null
-await client.sbuffer(url?)   // Returns ArrayBuffer | null
-await client.sform(url?)     // Returns FormData
+// Main fetch method
+await client.fetch(url?)      // Returns FetchyResponse
+
+// HTTP method shortcuts
+await client.get(url?)        // GET request, returns FetchyResponse
+await client.post(url?)       // POST request, returns FetchyResponse
+await client.put(url?)        // PUT request, returns FetchyResponse
+await client.patch(url?)      // PATCH request, returns FetchyResponse
+await client.delete(url?)     // DELETE request, returns FetchyResponse
+await client.head(url?)       // HEAD request, returns Promise<Response>
+
+// Safe mode methods
+await client.safe(url?)       // Returns FetchySafeResponse
+await client.sget(url?)       // Safe GET, returns FetchySafeResponse
+await client.spost(url?)      // Safe POST, returns FetchySafeResponse
+await client.sput(url?)       // Safe PUT, returns FetchySafeResponse
+await client.spatch(url?)     // Safe PATCH, returns FetchySafeResponse
+await client.sdelete(url?)    // Safe DELETE, returns FetchySafeResponse
+await client.shead(url?)      // Safe HEAD, returns Promise<Response | null>
 ```
 
-#### Static Methods
-
+All methods can be chained with parsing methods:
 ```ts
-// Same methods available as static
-await fy.fetch(url, options?)
-await fy.json<T>(url, options?)
-await fy.text(url, options?)
-await fy.bytes(url, options?)
-await fy.blob(url, options?)
-await fy.buffer(url, options?)
-await fy.form(url, options?)
-await fy.safe(url, options?)
-await fy.sjson<T>(url, options?)
-await fy.stext(url, options?)
-await fy.sbytes(url, options?)
-await fy.sblob(url, options?)
-await fy.sbuffer(url, options?)
-await fy.sform(url, options?)
+await client.get("/users").json<User[]>();
+await client.post("/create").json<Result>();
+await client.safe("/data").text();
 ```
 
 #### Example
-
 ```ts
 // Instance usage - reuse configuration
-const client = new fy({
+const client = new Fetchy({
+  base: "https://api.example.com",
   bearer: "token123",
   timeout: 10,
   retry: { maxAttempts: 3 }
 });
 
-const user = await client.json<User>("https://api.example.com/user");
-const posts = await client.json<Post[]>("https://api.example.com/posts");
+const user = await client.get("/user").json<User>();
+const posts = await client.get("/posts").json<Post[]>();
 
-// Static usage - one-off requests
-const data = await fy.json("https://api.example.com/data");
+// POST with body
+const result = await client.post("/create", {
+  body: { name: "John" }
+}).json();
 
 // Safe mode
-const result = await fy.sjson("https://api.example.com/data");
+const data = await client.sget("/data").json<Data>();
+if (data !== null) {
+  // Handle successful response
+}
+```
+
+### `fy(options?)` Function
+
+Shorthand for creating a new `Fetchy` instance.
+```ts
+const client = fy({
+  base: "https://api.example.com",
+  bearer: "token"
+});
+
+const user = await client.get("/user").json<User>();
+```
+
+Equivalent to:
+```ts
+const client = new Fetchy({
+  base: "https://api.example.com",
+  bearer: "token"
+});
 ```
 
 ## Configuration
 
 ### `FetchyOptions`
-
 ```ts
 interface FetchyOptions extends Omit<RequestInit, "body"> {
   // Request URL (allows null url parameter with this option)
-  url?: string | URL;
+  url?: string | URL | Request;
   
-  // Request body (auto-serializes JSON; ReadableStream is NOT supported)
-  body?: JSONValue | FormData | URLSearchParams | Blob | ArrayBuffer | string;
+  // Base URL prepended to request URL (only for string/URL, not Request)
+  base?: string | URL;
   
-  // Timeout in seconds (default: 15, set to 0 to disable)
+  // Request body (auto-serializes JSON objects)
+  body?: JSONValue | BodyInit;
+  
+  // Timeout in seconds (default: 15)
   timeout?: number;
   
   // Retry configuration (set to false to disable)
-  retry?: {
-    interval?: number;      // Base interval in seconds (default: 3)
-    maxInterval?: number;   // Maximum interval cap (default: 30)
-    maxAttempts?: number;   // Maximum retry attempts (default: 3)
-    retryAfter?: boolean;   // Respect Retry-After header (default: true)
-  } | false;
+  retry?: RetryOptions | false;
   
   // Bearer token (automatically adds "Bearer " prefix)
   bearer?: string;
   
-  // Initial jitter delay in seconds before request (default: 0)
-  delay?: number;
+  // Maximum jitter delay in seconds before request (default: 0)
+  jitter?: number;
   
   // Use native fetch error behavior (no HTTPStatusError on 4xx/5xx)
-  native?: true;
+  native?: boolean;
 }
+
+interface RetryOptions {
+  maxAttempts?: number;       // Maximum retry attempts (default: 3)
+  interval?: number;          // Base interval in seconds (default: 3)
+  maxInterval?: number;       // Maximum interval cap (default: 30)
+  retryOnTimeout?: boolean;   // Retry on timeout (default: true)
+  idempotentOnly?: boolean;   // Only retry idempotent methods (default: false)
+  statusCodes?: number[];     // Status codes to retry (default: [500, 502, 503, 504, 408, 429])
+  respectHeaders?: string[];  // Headers to respect for retry timing
+}                             // (default: ["retry-after", "ratelimit-reset", "x-ratelimit-reset"])
 ```
 
 #### Default Values
-
 ```ts
 {
   timeout: 15,        // 15 seconds
-  delay: 0,           // No jitter delay
+  jitter: 0,          // No jitter delay
+  native: false,      // Throws HTTPStatusError on non-OK status
   retry: {
     maxAttempts: 3,   // 3 retry attempts
     interval: 3,      // 3 seconds base interval
     maxInterval: 30,  // 30 seconds maximum interval
-    retryAfter: true  // Respect Retry-After header
-  },
-  native: undefined   // Throws HTTPStatusError on non-OK status (4xx, 5xx)
+    retryOnTimeout: true,     // Retry on timeout
+    idempotentOnly: false,    // Retry all methods
+    statusCodes: [500, 502, 503, 504, 408, 429],
+    respectHeaders: ["retry-after", "ratelimit-reset", "x-ratelimit-reset"]
+  }
 }
 ```
 
@@ -254,43 +287,27 @@ The following headers are automatically set if not specified:
 - **Accept**: `application/json, text/plain`
 - **Content-Type**: Automatically determined based on body type:
   - `string`, `URLSearchParams`, `FormData`, `Blob` with type: Not set (native fetch handles it)
-  - `JSONValue`: `application/json`
+  - `JSONValue` (objects, arrays, numbers, booleans): `application/json`
   - `Blob` without type, `ArrayBuffer`: `application/octet-stream`
 - **Authorization**: `Bearer ${options.bearer}` if bearer is provided
 
-**Note:** If you pass a body through a Request object, Content-Type is NOT set automatically by this package.
+**Note:** Headers from Request objects are preserved and merged with option headers.
 
 ## Error Handling
 
 ### HTTPStatusError
 
 Thrown when response status is not OK (4xx, 5xx) unless `native: true` is set.
-
 ```ts
+import { fetchy, HTTPStatusError } from "@scirexs/fetchy";
+
 try {
   await fetchy("https://api.example.com/data");
 } catch (error) {
   if (error instanceof HTTPStatusError) {
-    console.error(error.status);   // 404
-    console.error(error.body);     // Response body text
-    console.error(error.message);  // "404 Not Found: (no response body)"
-  }
-}
-```
-
-### RedirectError
-
-Thrown when `redirect: "error"` is set and a redirect response (3xx) is received.
-
-```ts
-try {
-  await fetchy("https://example.com/redirect", {
-    redirect: "error"
-  });
-} catch (error) {
-  if (error instanceof RedirectError) {
-    console.error(error.status);   // 301
-    console.error(error.message);  // "301 Moved Permanently"
+    console.error(error.status);    // 404
+    console.error(error.response);  // Response object
+    console.error(error.message);   // "404 https://api.example.com/data"
   }
 }
 ```
@@ -303,71 +320,74 @@ Other errors (network failures, timeout, abort) are thrown as standard errors:
 
 ### Safe Error Handling
 
-Use `sfetchy()` or `fy.safe()` to return `null` instead of throwing:
-
+Use `sfetchy()` or safe methods to return `null` instead of throwing:
 ```ts
-const data = await sfetchy("https://api.example.com/data", {}, "json");
-if (data === null) {
+// Safe fetch - returns null on any error
+const response = await sfetchy("https://api.example.com/data");
+if (response === null) {
   // Handle error gracefully
+}
+
+// Safe parsing methods - return null on error
+const data = await fetchy("https://api.example.com/data").json<Data>();
+if (data !== null) {
+  // Process data
 }
 ```
 
 ### Native Mode
 
 Set `native: true` to disable HTTPStatusError and get native fetch behavior:
-
 ```ts
 const response = await fetchy("https://api.example.com/data", {
   native: true
 });
 // Returns Response even for 4xx/5xx status codes
+if (!response.ok) {
+  console.error("Request failed");
+}
 ```
 
 ## Usage Examples
 
 ### Basic Requests
-
 ```ts
 import { fetchy, sfetchy } from "@scirexs/fetchy";
 
 // GET with automatic JSON parsing
-const data = await fetchy<User[]>("https://api.example.com/users", {}, "json");
+const users = await fetchy("https://api.example.com/users").json<User[]>();
 
 // POST with JSON body
 const result = await fetchy("https://api.example.com/create", {
+  method: "POST",
   body: { name: "John", email: "john@example.com" }
-}, "json");
+}).json();
 
 // Custom headers
 const response = await fetchy("https://api.example.com/data", {
   headers: { "X-Custom-Header": "value" }
 });
 
-// Reuse options as preset configuration
-const options: FetchyOptions = {
-  url: "https://api.example.com/data",
-  retry: false
-};
-await fetchy(null, options);
-await fetchy(null, options);
+// Using base URL
+const data = await fetchy("/users", {
+  base: "https://api.example.com"
+}).json();
 ```
 
 ### Authentication
-
 ```ts
 // Bearer token authentication
-const user = await fetchy<User>("https://api.example.com/me", {
+const user = await fetchy("https://api.example.com/me", {
   bearer: "your-access-token"
-}, "json");
+}).json<User>();
 
 // Custom authorization
 const data = await fetchy("https://api.example.com/data", {
   headers: { "Authorization": "Basic " + btoa("user:pass") }
-}, "json");
+}).json();
 ```
 
 ### Timeout and Retry
-
 ```ts
 // Custom timeout
 const response = await fetchy("https://slow-api.example.com", {
@@ -375,15 +395,20 @@ const response = await fetchy("https://slow-api.example.com", {
 });
 
 // Retry with exponential backoff
-// Intervals: 1s (3^0), 3s (3^1), 9s (3^2), 27s (3^3), capped at maxInterval
+// Intervals: 3s, 6s, 12s, 24s (capped at maxInterval)
 const data = await fetchy("https://api.example.com/data", {
   retry: {
     maxAttempts: 5,
     interval: 3,
-    maxInterval: 60,
-    retryAfter: true
+    maxInterval: 60
   }
-}, "json");
+}).json();
+
+// Retry only idempotent methods (GET, HEAD, PUT, DELETE, OPTIONS, TRACE)
+const result = await fetchy("https://api.example.com/update", {
+  method: "POST",
+  retry: { idempotentOnly: true }  // Won't retry POST
+}).json();
 
 // Disable retry
 const response = await fetchy("https://api.example.com/data", {
@@ -392,21 +417,20 @@ const response = await fetchy("https://api.example.com/data", {
 ```
 
 ### Error Handling Patterns
-
 ```ts
-import { fetchy, sfetchy, HTTPStatusError, RedirectError } from "@scirexs/fetchy";
+import { fetchy, sfetchy, HTTPStatusError } from "@scirexs/fetchy";
 
 // Default: throws on error
 try {
-  const data = await fetchy("https://api.example.com/data", {}, "json");
+  const data = await fetchy("https://api.example.com/data").json();
 } catch (error) {
   if (error instanceof HTTPStatusError) {
-    console.error(`HTTP ${error.status}: ${error.body}`);
+    console.error(`HTTP ${error.status}:`, error.response);
   }
 }
 
 // Safe mode: returns null
-const data = await sfetchy("https://api.example.com/data", {}, "json");
+const data = await sfetchy("https://api.example.com/data").json();
 if (data === null) {
   console.log("Request failed, using default");
 }
@@ -420,98 +444,131 @@ if (!response.ok) {
 }
 ```
 
-### Fluent API
-
+### Fluent API with HTTP Methods
 ```ts
+import { Fetchy, fy } from "@scirexs/fetchy";
+
 // Create reusable client
-const api = new fy({
-  url: "https://api.example.com",
+const api = fy({
+  base: "https://api.example.com",
   bearer: "token",
   timeout: 10,
   retry: { maxAttempts: 3 }
 });
 
-// Instance methods
-const users = await api.json<User[]>("/users");
-const post = await api.json<Post>("/posts/1");
-const text = await api.text("/readme.txt");
+// HTTP method shortcuts
+const users = await api.get("/users").json<User[]>();
+const post = await api.get("/posts/1").json<Post>();
+const created = await api.post("/posts", {
+  body: { title: "New Post" }
+}).json();
+const updated = await api.put("/posts/1", {
+  body: { title: "Updated" }
+}).json();
+const patched = await api.patch("/posts/1", {
+  body: { views: 100 }
+}).json();
+await api.delete("/posts/1");
 
 // Safe methods
-const data = await api.sjson("/maybe-fails");
+const data = await api.sget("/maybe-fails").json();
 if (data !== null) {
   // Process data
 }
 
-// Static methods for one-off requests
-const response = await fy.fetch("https://example.com");
-const json = await fy.json("https://api.example.com/data");
+// Override instance options per request
+const text = await api.get("/readme.txt", {
+  timeout: 5
+}).text();
 ```
 
 ### Advanced Usage
 
-#### Jitter and Delays
+#### Jitter for Load Distribution
 ```ts
-// Jitter to prevent thundering herd
+// Add randomized delay to prevent thundering herd
 const response = await fetchy("https://api.example.com/data", {
-  delay: 2,  // Random delay up to 2 seconds
+  jitter: 2,  // Random delay up to 2 seconds before each request
   retry: { maxAttempts: 3 }
 });
 ```
 
 #### Abort Signals
 ```ts
-// Combined abort signals
+// Manual abort control
 const controller = new AbortController();
-const request = new Request("https://api.example.com/data", {
+const promise = fetchy("https://api.example.com/data", {
   signal: controller.signal
 });
 
 setTimeout(() => controller.abort(), 5000);
 
-const response = await fetchy(request, {
-  signal: AbortSignal.timeout(10000)
+try {
+  await promise;
+} catch (error) {
+  // Aborted after 5 seconds
+}
+
+// Combining timeout with manual abort
+const controller = new AbortController();
+await fetchy("https://api.example.com/data", {
+  timeout: 10,
+  signal: controller.signal
 });
+// Request will abort after 10 seconds OR when controller.abort() is called
 ```
 
-#### Form Data
+#### Form Data and File Uploads
 ```ts
 // Form data upload
 const formData = new FormData();
-formData.append("file", blob);
+formData.append("file", blob, "filename.png");
 formData.append("name", "example");
 
 await fetchy("https://api.example.com/upload", {
+  method: "POST",
   body: formData
 });
 
 // URL-encoded form
-const params = new URLSearchParams({ key: "value" });
+const params = new URLSearchParams({ key: "value", foo: "bar" });
 await fetchy("https://api.example.com/form", {
+  method: "POST",
   body: params
 });
 ```
 
-#### Testing Utilities
-
-When writing tests for code that uses `fetchy`, you may need to simulate immediate failures without triggering retry logic. Use the `NO_RETRY_ERROR` constant to bypass all retry attempts:
+#### Streaming with ReadableStream
 ```ts
-import { fetchy, NO_RETRY_ERROR } from "@scirexs/fetchy";
+// ReadableStream can be used via Request object
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("chunk 1\n"));
+    controller.enqueue(new TextEncoder().encode("chunk 2\n"));
+    controller.close();
+  }
+});
 
-const originalFetch = globalThis.fetch;
-globalThis.fetch = () => Promise.reject(new Error(NO_RETRY_ERROR));
+const response = await fetchy("https://api.example.com/stream", {
+  method: "POST",
+  body: stream
+});
+```
 
-try {
-  await fetchy("https://api.example.com/data");
-} catch (error) {
-  // Error is thrown immediately without retries
-  console.error(error);
-} finally {
-  globalThis.fetch = originalFetch;
-}
+#### Retry-After Header Respect
+```ts
+// Automatically respects Retry-After, RateLimit-Reset, X-RateLimit-Reset headers
+const data = await fetchy("https://api.example.com/rate-limited", {
+  retry: {
+    maxAttempts: 5,
+    interval: 1,  // Minimum interval if header not present
+    respectHeaders: ["retry-after", "ratelimit-reset"]
+  }
+}).json();
+// If response has "Retry-After: 10", will wait 10 seconds before retry
 ```
 
 ### Type-Safe API Responses
-
 ```ts
 interface ApiResponse<T> {
   success: boolean;
@@ -525,42 +582,88 @@ interface Todo {
   completed: boolean;
 }
 
-const response = await fetchy<ApiResponse<Todo>>(
-  "https://api.example.com/todos/1",
-  {},
-  "json"
-);
+const response = await fetchy("https://api.example.com/todos/1")
+  .json<ApiResponse<Todo>>();
 
 if (response.success) {
   console.log(response.data.title);  // Fully typed
 }
+
+// With safe parsing
+const result = await sfetchy("https://api.example.com/todos/1")
+  .json<ApiResponse<Todo>>();
+
+if (result !== null && result.success) {
+  console.log(result.data.completed);
+}
 ```
 
-## Limitations
+## Best Practices
 
-### Content-Type Header with Request Objects
-
-When a body is set in a Request object, the Content-Type header is NOT set automatically by this package. Use the `url` property in `FetchyOptions` instead to benefit from automatic header configuration:
-
+### 1. Use Base URL for API Clients
 ```ts
-// Instead of this:
-const request = new Request("https://api.example.com", { body: jsonData });
-await fetchy(request);
-
-// Do this:
-await fetchy(null, {
-  url: "https://api.example.com",
-  body: jsonData
+const api = fy({
+  base: "https://api.example.com",
+  bearer: process.env.API_TOKEN,
+  timeout: 10
 });
+
+// All requests are relative to base
+await api.get("/users").json();
+await api.post("/posts", { body: data }).json();
 ```
 
-### ReadableStream as Body
+### 2. Choose Safe vs. Throwing Behavior
+```ts
+// For critical operations: use regular methods (throws on error)
+try {
+  const result = await fetchy(url).json();
+  // Process result
+} catch (error) {
+  // Handle error explicitly
+}
 
-`FetchyOptions` does not accept ReadableStream as a body. If you need to use ReadableStream, create a Request object with the stream and pass it to `fetchy()`.
+// For optional data: use safe methods (returns null)
+const data = await fetchy(url).sjson();
+if (data !== null) {
+  // Process data
+}
+// Continue regardless of result
+```
 
-### Redirect Error Handling
+### 3. Configure Retry for Resilience
+```ts
+// Aggressive retry for critical operations
+const result = await fetchy(url, {
+  retry: {
+    maxAttempts: 5,
+    interval: 2,
+    maxInterval: 30,
+    retryOnTimeout: true
+  }
+}).json();
 
-When `redirect` is set to `"error"`, this package throws a custom `RedirectError` (instead of native TypeError) to enable proper retry handling for redirect responses.
+// No retry for operations that must be fast
+const data = await fetchy(url, {
+  retry: false,
+  timeout: 2
+}).json();
+```
+
+### 4. Use Method Shortcuts for Clarity
+```ts
+const api = fy({ base: "https://api.example.com" });
+
+// Clear and concise
+await api.get("/users").json();
+await api.post("/users", { body: newUser }).json();
+await api.delete("/users/123");
+
+// Instead of
+await api.fetch("/users", { method: "GET" }).json();
+await api.fetch("/users", { method: "POST", body: newUser }).json();
+await api.fetch("/users/123", { method: "DELETE" });
+```
 
 ## License
 

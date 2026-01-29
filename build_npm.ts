@@ -48,6 +48,7 @@ await build({
   async postBuild() {
     const main = "./npm/esm/main.js";
     removeInternals(main);
+    replaceInternalName(main);
     minify(main);
     Deno.copyFileSync("LICENSE", "npm/LICENSE");
     Deno.copyFileSync("README.md", "npm/README.md");
@@ -57,8 +58,29 @@ await build({
 function removeInternals(path: string) {
   const content = Deno.readTextFileSync(path);
   const lines = content.split("\n");
-  lines[0] = "export { fetchy, fy, HTTPStatusError, NO_RETRY_ERROR, RedirectError, sfetchy };"
+  lines[0] = "export { Fetchy, fetchy, fy, HTTPStatusError, sfetchy };"
   Deno.writeTextFileSync(path, lines.join("\n"));
+}
+
+function replaceInternalName(path: string) {
+  const list: [string, string][] = [
+    ["ztimeout","a"],
+    ["zjitter","b"],
+    ["zinterval","c"],
+    ["zmaxInterval","d"],
+    ["zmaxAttempts","e"],
+    ["zonTimeout","f"],
+    ["znoIdempotent","g"],
+    ["zstatusCodes","h"],
+    ["zrespects","i"],
+    ["znative","j"],
+    ["zsignal","k"],
+  ];
+  let content = Deno.readTextFileSync(path);
+  for (const [from, to] of list) {
+    content = content.replaceAll(from, to);
+  }
+  Deno.writeTextFileSync(path, content);
 }
 
 async function minify(path: string) {
@@ -74,3 +96,4 @@ async function minify(path: string) {
     esbuild.stop();
   }
 }
+
