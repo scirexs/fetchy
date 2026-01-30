@@ -173,3 +173,177 @@ export interface FetchySafeResponse extends Promise<Response | null> {
   /** Parses response body safety as FormData. */
   formData: () => Promise<FormData | null>;
 }
+/**
+ * Fluent HTTP client interface with pre-configured options.
+ * Created by `fy()` function, this interface allows method chaining and provides
+ * both standard and safe (error-suppressing) variants of HTTP methods.
+ *
+ * All methods inherit the options specified when creating the Fetchy instance,
+ * which can be overridden by passing additional options to individual method calls.
+ *
+ * @example
+ * ```ts
+ * import { fy } from "@scirexs/fetchy";
+ *
+ * // Create client with base configuration
+ * const api = fy({
+ *   base: "https://api.example.com",
+ *   bearer: "token123",
+ *   timeout: 10,
+ *   retry: { maxAttempts: 3 }
+ * });
+ *
+ * // Use standard methods (throw on error)
+ * const user = await api.get("/user").json<User>();
+ * const result = await api.post("/data", { body: { key: "value" } }).json();
+ *
+ * // Use safe methods (return null on error)
+ * const posts = await api.sget("/posts").json<Post[]>();
+ * if (posts === null) {
+ *   console.log("Failed to fetch posts");
+ * }
+ *
+ * // Override instance options
+ * const data = await api.get("/important", {
+ *   timeout: 30,
+ *   retry: { maxAttempts: 5 }
+ * }).json();
+ * ```
+ */
+export interface Fetchy extends FetchyOptions {
+  /**
+   * Performs HTTP request with instance options.
+   * Equivalent to calling `fetchy()` with pre-configured options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object with parsing methods.
+   */
+  fetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs GET request with instance options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object with parsing methods.
+   */
+  get(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs HEAD request with instance options.
+   * HEAD requests only retrieve headers without response body.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise resolving to Response object.
+   */
+  head(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response>;
+
+  /**
+   * Performs POST request with instance options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object with parsing methods.
+   */
+  post(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs PUT request with instance options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object with parsing methods.
+   */
+  put(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs PATCH request with instance options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object with parsing methods.
+   */
+  patch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs DELETE request with instance options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object with parsing methods.
+   */
+  delete(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+
+  /**
+   * Performs HTTP request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   * Equivalent to calling `sfetchy()` with pre-configured options.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  sfetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+
+  /**
+   * Performs GET request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  sget(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+
+  /**
+   * Performs HEAD request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise resolving to Response or null.
+   */
+  shead(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response | null>;
+
+  /**
+   * Performs POST request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  spost(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+
+  /**
+   * Performs PUT request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  sput(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+
+  /**
+   * Performs PATCH request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options (typically includes `body`).
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  spatch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+
+  /**
+   * Performs DELETE request in safe mode with instance options.
+   * Returns `null` on any error instead of throwing.
+   *
+   * @param url - Request URL (uses instance `url` if omitted).
+   * @param options - Additional options to merge with instance options.
+   * @returns Promise-like response object that resolves to Response or null.
+   */
+  sdelete(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+}

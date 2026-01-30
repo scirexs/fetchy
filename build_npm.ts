@@ -58,7 +58,7 @@ await build({
 function removeInternals(path: string) {
   const content = Deno.readTextFileSync(path);
   const lines = content.split("\n");
-  lines[0] = "export { Fetchy, fetchy, fy, HTTPStatusError, sfetchy };"
+  lines[0] = "export { fetchy, fy, HTTPStatusError, setFetchy, sfetchy };"
   Deno.writeTextFileSync(path, lines.join("\n"));
 }
 
@@ -75,6 +75,9 @@ function replaceInternalName(path: string) {
     ["zrespects","i"],
     ["znative","j"],
     ["zsignal","k"],
+    ["zurl","l"],
+    ["zbase","m"],
+    ["zbody","n"],
   ];
   let content = Deno.readTextFileSync(path);
   for (const [from, to] of list) {

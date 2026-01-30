@@ -1,5 +1,5 @@
 export {
-  _assignToPromise,
+  _assign,
   _buildOption,
   _cloneRequestF,
   _correctNumber,
@@ -8,6 +8,7 @@ export {
   _fetchWithJitter,
   _fetchWithRetry,
   _findRetryHeader,
+  _genMethods,
   _getBody,
   _getContentType,
   _getHeaders,
@@ -29,20 +30,18 @@ export {
   _main,
   _makeFetchyResponse,
   _mergeSignals,
-  _METHODS,
-  _NO_IDEM,
   _parseRetryHeader,
   _shouldRetry,
   _wait,
   _withTimeout,
-  Fetchy,
   fetchy,
   fy,
   HTTPStatusError,
+  setFetchy,
   sfetchy,
 };
 
-import type { FetchyBody, FetchyOptions, FetchyResponse, FetchySafeResponse, RetryOptions } from "./types.ts";
+import type { Fetchy, FetchyBody, FetchyOptions, FetchyResponse, FetchySafeResponse, RetryOptions } from "./types.ts";
 
 /*=============== Constant Values ===============*/
 const MGET = "GET";
@@ -51,6 +50,7 @@ const MPOST = "POST";
 const MPUT = "PUT";
 const MPATCH = "PATCH";
 const MDELETE = "DELETE";
+const MFETCH = "fetch";
 const H_ACCEPT = "Accept";
 const H_CTYPE = "Content-Type";
 const MIME_JSON = "application/json";
@@ -71,6 +71,8 @@ const _DEFAULT: Options = {
 const _NO_IDEM = [MPOST, MPATCH, "CONNECT"];
 /** Additional methods for Promise-like interface. */
 const _METHODS = ["text", "json", "bytes", "blob", "arrayBuffer", "formData"] as const;
+/** methods for Fetchy. */
+const _FETCHY = [MFETCH, MGET, MHEAD, MPOST, MPUT, MPATCH, MDELETE];
 
 /*=============== Internal Types ================*/
 /** Internal normalized options used throughout the fetch process. */
@@ -86,6 +88,9 @@ interface Options {
   zrespects: string[];
   znative: boolean;
   zsignal?: AbortSignal;
+  zurl?: string | URL | Request;
+  zbase?: string | URL;
+  zbody?: FetchyBody;
 }
 /** URL argument type for fetchy functions. */
 type InputArg = string | URL | Request | null;
@@ -96,6 +101,7 @@ type InternalRetry = Pick<
 >;
 
 /*=============== Main Codes ====================*/
+let _baseOption: FetchyOptions = {};
 /**
  * Error thrown when HTTP response has a non-OK status code (4xx, 5xx).
  * Only thrown when `native` option is set to false (default behavior).
@@ -124,140 +130,11 @@ class HTTPStatusError extends Error {
 }
 
 /**
- * A fluent HTTP client class that provides both instance and static methods for making HTTP requests.
+ * A fluent HTTP client that provides methods for making HTTP requests.
  * Supports features like timeout, retry with exponential backoff, automatic header management, and response parsing.
  *
- * @example
- * ```ts
- * // Instance usage - reuse configuration
- * const client = new Fetchy({
- *   bearer: "token123",
- *   timeout: 10,
- *   retry: { maxAttempts: 3 }
- * });
- * const user = await client.get("https://api.example.com/user").json<User>();
- * const posts = await client.get("https://api.example.com/posts").json<Post[]>();
- *
- * // Safe mode - returns null on error instead of throwing
- * const result = await client.safe("https://api.example.com/data").json<Data>();
- * if (result !== null) {
- *   // Handle successful response
- * }
- * ```
- */
-class Fetchy implements FetchyOptions {
-  /** Request URL. Used when calling methods with null as URL argument. */
-  url?: string | URL | Request;
-  /**
-   * Base URL prepended to the request URL.
-   * Only used when the URL argument is a string or URL (not when it's a Request object).
-   */
-  base?: string | URL;
-  /** Request body content. Automatically serializes JSON objects. */
-  body?: FetchyBody;
-  /** Request timeout in seconds. Default is 15 seconds. */
-  timeout?: number;
-  /** Retry configuration. Set to false to disable retry functionality. */
-  retry?: false | RetryOptions;
-  /** Bearer token for Authorization header. Automatically adds "Bearer " prefix. */
-  bearer?: string;
-  /**
-   * Maximum jitter delay in seconds applied before each request (including retries).
-   * Adds randomness (0 to specified value) to prevent thundering herd.
-   */
-  jitter?: number;
-  /** If true, does not throw error on HTTP error status, behaving like native fetch. */
-  native?: boolean;
-  /** Property of RequestInit. */
-  cache?: RequestCache;
-  /** Property of RequestInit. */
-  credentials?: RequestCredentials;
-  /** Property of RequestInit. */
-  headers?: HeadersInit;
-  /** Property of RequestInit. */
-  integrity?: string;
-  /** Property of RequestInit. */
-  keepalive?: boolean;
-  /** Property of RequestInit. */
-  method?: string;
-  /** Property of RequestInit. */
-  mode?: RequestMode;
-  /** Property of RequestInit. */
-  redirect?: RequestRedirect;
-  /** Property of RequestInit. */
-  referrer?: string;
-  /** Property of RequestInit. */
-  referrerPolicy?: ReferrerPolicy;
-  /** Property of RequestInit. */
-  signal?: AbortSignal | null;
-
-  constructor(options?: FetchyOptions) {
-    Object.assign(this, options);
-  }
-  /** Calls fetchy with instance options. */
-  fetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options));
-  }
-  /** Calls fetchy as GET request with instance options. */
-  get(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options, MGET));
-  }
-  /** Calls fetchy as HEAD request with instance options. */
-  head(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response> {
-    return fetchy(url, _buildOption(this, options, MHEAD));
-  }
-  /** Calls fetchy as POST request with instance options. */
-  post(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options, MPOST));
-  }
-  /** Calls fetchy as PUT request with instance options. */
-  put(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options, MPUT));
-  }
-  /** Calls fetchy as PATCH request with instance options. */
-  patch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options, MPATCH));
-  }
-  /** Calls fetchy as DELETE request with instance options. */
-  delete(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-    return fetchy(url, _buildOption(this, options, MDELETE));
-  }
-  /** Calls sfetchy with instance options. Returns null on error. */
-  safe(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options));
-  }
-  /** Calls sfetchy as GET request with instance options. Returns null on error. */
-  sget(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options, MGET));
-  }
-  /** Calls sfetchy as HEAD request with instance options. Returns null on error. */
-  shead(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response | null> | null {
-    return sfetchy(url, _buildOption(this, options, MHEAD));
-  }
-  /** Calls sfetchy as POST request with instance options. Returns null on error. */
-  spost(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options, MPOST));
-  }
-  /** Calls sfetchy as PUT request with instance options. Returns null on error. */
-  sput(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options, MPUT));
-  }
-  /** Calls sfetchy as PATCH request with instance options. Returns null on error. */
-  spatch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options, MPATCH));
-  }
-  /** Calls sfetchy as DELETE request with instance options. Returns null on error. */
-  sdelete(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-    return sfetchy(url, _buildOption(this, options, MDELETE));
-  }
-}
-
-/**
- * Creates a new Fetchy instance with the specified options.
- * Shorthand for `new Fetchy(options)`.
- *
  * @param options - Configuration options to apply to all requests made with this instance.
- * @returns A new Fetchy instance.
+ * @returns An object that has Fetchy interface.
  *
  * @example
  * ```ts
@@ -271,10 +148,19 @@ class Fetchy implements FetchyOptions {
  *
  * const user = await client.get("/user").json<User>();
  * const posts = await client.get("/posts").json<Post[]>();
+ *
+ * // Safe mode - returns null on error instead of throwing
+ * const result = await client.sfetch("https://api.example.com/data").json<Data>();
+ * if (result !== null) {
+ *   // Handle successful response
+ * }
  * ```
  */
 function fy(options?: FetchyOptions): Fetchy {
-  return new Fetchy(options);
+  const result = _assign({}, options);
+  _genMethods(result);
+  _genMethods(result, true);
+  return result as Fetchy;
 }
 
 /**
@@ -317,12 +203,8 @@ function fy(options?: FetchyOptions): Fetchy {
  * }
  * ```
  */
-function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse | null {
-  try {
-    return _main(url, options, true);
-  } catch {
-    return null;
-  }
+function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse {
+  return _main(url, options, true);
 }
 
 /**
@@ -376,20 +258,45 @@ function fetchy(url?: string | URL | Request | null, options?: FetchyOptions): F
   return _main(url, options);
 }
 
+/**
+ * Sets global default options for all fetchy instances.
+ * These options will be merged with instance-specific options, with instance options taking precedence.
+ *
+ * @param options - Default configuration options to apply globally.
+ *
+ * @example
+ * ```ts
+ * import { setFetchy, fetchy } from "@scirexs/fetchy";
+ *
+ * // Set global defaults
+ * setFetchy({
+ *   timeout: 30,
+ *   retry: { maxAttempts: 5 },
+ *   bearer: "global-token"
+ * });
+ *
+ * // All subsequent requests use these defaults
+ * await fetchy("https://api.example.com/data");
+ * ```
+ */
+function setFetchy(options: FetchyOptions) {
+  _baseOption = options;
+}
+
 /** Main procedure for fetchy and sfetchy. @internal */
 function _main(url: InputArg | undefined, options: FetchyOptions | undefined, safe?: undefined): FetchyResponse;
 function _main(url: InputArg | undefined, options: FetchyOptions | undefined, safe: true): FetchySafeResponse;
 function _main(url?: InputArg, options?: FetchyOptions, safe: boolean = false): FetchyResponse | FetchySafeResponse {
-  const req = _includeStream(_createRequest(url, options));
+  options = _buildOption(_baseOption, options);
   const init = _getRequestInit(url, options);
   const opts = _getOptions(init, url, options);
-  return _makeFetchyResponse(req, init, opts, safe);
+  return _makeFetchyResponse(_fetchWithRetry(url, init, opts, safe), safe);
 }
 
 /*=============== Helper Codes ==================*/
 /** Creates new options object with specified HTTP method and temporal options. @internal */
 function _buildOption(options?: FetchyOptions, temp?: FetchyOptions, method?: string): FetchyOptions {
-  return { ...options, ...temp, method };
+  return { ...options, ...temp, ...(method && { method }) };
 }
 /** Type guard: checks if value is a string. @internal */
 function _isString(v: unknown): v is string {
@@ -416,21 +323,13 @@ function _isPlain(v: unknown): v is object {
   return Boolean(v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype);
 }
 /** Corrects a number to be non-negative, using default if invalid. @internal */
+// deno-lint-ignore ban-types
+function _assign<T extends {}>(target: T, source: unknown) {
+  return Object.assign(target, source);
+}
+/** Corrects a number to be non-negative, using default if invalid. @internal */
 function _correctNumber(dflt: number, num?: number): number {
   return (num ?? -1) >= 0 ? num! : dflt;
-}
-/** Creates Request object from various input types. @internal */
-function _createRequest(url?: InputArg, options?: FetchyOptions): Request {
-  if (_isRequest(url)) return url;
-  if (!url) url = options?.url ?? "";
-  if (_isRequest(url)) return url;
-  return new Request(URL.parse(url, options?.base) ?? "");
-}
-/** Creates new Request with ReadableStream body if present in options. @internal */
-function _includeStream(req: Request, options?: FetchyOptions): Request {
-  if (!_isStream(options?.body)) return req;
-  const method = [MGET, MHEAD].includes(req.method) ? MPOST : req.method;
-  return new Request(req, { method, body: options.body });
 }
 /** Converts FetchyOptions to standard RequestInit format. @internal */
 function _getRequestInit(url?: InputArg, options?: FetchyOptions): RequestInit {
@@ -496,6 +395,9 @@ function _getOptions(init: RequestInit, url?: InputArg, options?: FetchyOptions)
     zjitter: _correctNumber(_DEFAULT.zjitter, options?.jitter),
     znative: options?.native ?? _DEFAULT.znative,
     zsignal: _mergeSignals(_isRequest(url) ? url.signal : null, options?.signal),
+    zurl: options?.url,
+    zbase: options?.base,
+    zbody: options?.body,
   };
 }
 /** Merges multiple AbortSignals into one. @internal */
@@ -519,8 +421,8 @@ function _isHttpError(stat: number): boolean {
   return stat >= 400 || stat < 100;
 }
 /** Determines whether to retry based on conditions and waits before next attempt. @internal */
-async function _shouldRetry(count: number, opts: Options, r: Response | unknown): Promise<boolean> {
-  if (opts.znoIdempotent || count >= opts.zmaxAttempts - 1) return false;
+async function _shouldRetry(count: number, opts: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
+  if (opts.znoIdempotent || count >= opts.zmaxAttempts - 1 || !fn) return false;
   if (r instanceof Response) {
     if (opts.znative || !opts.zstatusCodes.includes(r.status)) return false;
 
@@ -553,25 +455,18 @@ function _parseRetryHeader(value?: string | null): number {
   if (!Number.isNaN(sec1)) return sec1;
   return Math.ceil((new Date(value).getTime() - Date.now()) / 1000);
 }
-/** Fetch with retry and creates promise-like object. @internal */
-function _makeFetchyResponse(req: Request, init: RequestInit, opts: Options, safe: boolean = false): FetchyResponse | FetchySafeResponse {
-  const resp = _fetchWithRetry(req, init, opts, safe);
-  return _assignToPromise(resp, safe);
+/** Creates new Request with ReadableStream body if present in options. @internal */
+function _includeStream(req: Request, opts: Options): Request {
+  if (!_isStream(opts.zbody)) return req;
+  const method = [MGET, MHEAD].includes(req.method) ? MPOST : req.method;
+  return new Request(req, { method, body: opts.zbody });
 }
-/** Creates promise-like object with convenience parsing methods. @internal */
-function _assignToPromise(resp: Promise<Response | null>, safe: boolean): FetchyResponse | FetchySafeResponse {
-  return Object.assign(
-    resp,
-    Object.fromEntries([
-      ...(
-        safe
-          // deno-lint-ignore no-explicit-any
-          ? _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]()).catch(() => null)])
-          // deno-lint-ignore no-explicit-any
-          : _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]())])
-      ),
-    ]),
-  );
+/** Creates Request object from various input types. @internal */
+function _createRequest(opts: Options, url?: InputArg): Request {
+  if (_isRequest(url)) return url;
+  if (!url) url = opts?.zurl ?? "";
+  if (_isRequest(url)) return url;
+  return new Request(URL.parse(url, opts?.zbase) ?? "");
 }
 /** Creates request cloning function with abort handling. @internal */
 function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
@@ -585,20 +480,21 @@ function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
   };
 }
 /** Executes fetch with retry logic and exponential backoff. @internal */
-async function _fetchWithRetry(req: Request, init: RequestInit, opts: Options, safe: boolean): Promise<Response | null> {
-  const creq = _cloneRequestF(req);
+async function _fetchWithRetry(url: InputArg | undefined, init: RequestInit, opts: Options, safe: boolean): Promise<Response | null> {
+  let creq;
   for (let i = 0; i < opts.zmaxAttempts; i++) {
     try {
-      const resp = await _fetchWithJitter(await creq(), init, opts);
-      if (await _shouldRetry(i, opts, resp)) continue;
+      if (i === 0) creq = _cloneRequestF(_includeStream(_createRequest(opts, url), opts));
+      const resp = await _fetchWithJitter(await creq!(), init, opts);
+      if (await _shouldRetry(i, opts, resp, creq)) continue;
       if (_isHttpError(resp.status) && !opts.znative) throw new HTTPStatusError(resp);
       return resp;
     } catch (e) {
-      if (await _shouldRetry(i, opts, e)) continue;
+      if (await _shouldRetry(i, opts, e, creq)) continue;
       if (safe) return null;
       throw e;
     } finally {
-      await creq(true);
+      await creq?.(true);
     }
   }
   throw new Error();
@@ -607,4 +503,29 @@ async function _fetchWithRetry(req: Request, init: RequestInit, opts: Options, s
 async function _fetchWithJitter(req: Request, init: RequestInit, opts: Options): Promise<Response> {
   await _wait(opts.zjitter, true);
   return await fetch(req, { ...init, signal: _withTimeout(opts) });
+}
+/** Creates promise-like object with convenience parsing methods. @internal */
+function _makeFetchyResponse(resp: Promise<Response | null>, safe: boolean): FetchyResponse | FetchySafeResponse {
+  return _assign(
+    resp,
+    Object.fromEntries([
+      ...(
+        safe
+          // deno-lint-ignore no-explicit-any
+          ? _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]()).catch(() => null)])
+          // deno-lint-ignore no-explicit-any
+          : _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]())])
+      ),
+    ]),
+  ) as FetchyResponse | FetchySafeResponse;
+}
+function _genMethods(obj: object, safe?: boolean) {
+  for (const m of _FETCHY) {
+    const name = (safe ? "s" : "") + m.toLowerCase();
+    // deno-lint-ignore no-explicit-any
+    (obj as any)[name] = function (this: Fetchy, url?: InputArg, opts?: FetchyOptions) {
+      const o = m === MFETCH ? _buildOption(this, opts) : _buildOption(this, opts, m);
+      return safe ? sfetchy(url, o) : fetchy(url, o);
+    };
+  }
 }

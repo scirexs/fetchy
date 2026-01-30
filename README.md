@@ -4,12 +4,13 @@
 [![JSR](https://img.shields.io/jsr/v/%40scirexs/fetchy)](https://jsr.io/@scirexs/fetchy)
 [![license](https://img.shields.io/github/license/scirexs/fetchy)](https://github.com/scirexs/fetchy/blob/main/LICENSE)
 
-A lightweight, type-safe fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing. Works in Deno, Node.js, and modern browsers.
+A lightweight thin fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing. Works in Deno, Node.js, and modern browsers.
 
 ## Features
 
-- **Lightweight** - Bundle size is ~5KB uncompressed, ~2KB gzipped, zero dependencies
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
+- **Lightweight** - Bundle size is ~5KB uncompressed, ~2KB gzipped, zero dependencies
+- **Native Fetch Compatible** - Thin abstraction layer, easy migration back to native fetch
 - **Promise-like Interface** - Chain parsing methods directly on fetch results
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
 - **Retry Logic** - Exponential backoff with Retry-After header support
@@ -30,7 +31,7 @@ deno add jsr:@scirexs/fetchy
 
 ## Quick Start
 ```ts
-import { fetchy, sfetchy, Fetchy, fy } from "@scirexs/fetchy";
+import { fetchy, sfetchy, fy } from "@scirexs/fetchy";
 
 // Simple GET request with automatic JSON parsing
 const user = await fetchy("https://api.example.com/user/1").json<User>();
@@ -105,10 +106,10 @@ Same as `fetchy()`.
 
 - `text()` → `Promise<string | null>` - Safe text parsing (returns null on error)
 - `json<T>()` → `Promise<T | null>` - Safe JSON parsing (returns null on error)
-- `bytes()` → `Promise<Uint8Array | null>` - Safe bytes parsing
-- `blob()` → `Promise<Blob | null>` - Safe blob parsing
-- `arrayBuffer()` → `Promise<ArrayBuffer | null>` - Safe buffer parsing
-- `formData()` → `Promise<FormData | null>` - Safe form data parsing
+- `bytes()` → `Promise<Uint8Array | null>` - Safe bytes parsing (returns null on error)
+- `blob()` → `Promise<Blob | null>` - Safe blob parsing (returns null on error)
+- `arrayBuffer()` → `Promise<ArrayBuffer | null>` - Safe buffer parsing (returns null on error)
+- `formData()` → `Promise<FormData | null>` - Safe form data parsing (returns null on error)
 
 #### Example
 ```ts
@@ -127,51 +128,46 @@ if (data !== null) {
 }
 ```
 
-### `Fetchy` Class
+### `fy(options?)`
 
-A fluent HTTP client class that provides instance methods.
+Creates a fluent HTTP client with pre-configured options that provides HTTP method shortcuts.
 
-#### Constructor
+#### Client Methods
 ```ts
-const client = new Fetchy(options?: FetchyOptions);
-```
-
-#### Instance Methods
-```ts
-const client = new Fetchy(options);
+const client = fy(options);
 
 // Main fetch method
-await client.fetch(url?)      // Returns FetchyResponse
+await client.fetch(url?, options?)    // Returns FetchyResponse
 
 // HTTP method shortcuts
-await client.get(url?)        // GET request, returns FetchyResponse
-await client.post(url?)       // POST request, returns FetchyResponse
-await client.put(url?)        // PUT request, returns FetchyResponse
-await client.patch(url?)      // PATCH request, returns FetchyResponse
-await client.delete(url?)     // DELETE request, returns FetchyResponse
-await client.head(url?)       // HEAD request, returns Promise<Response>
+await client.get(url?, options?)      // GET request, returns FetchyResponse
+await client.post(url?, options?)     // POST request, returns FetchyResponse
+await client.put(url?, options?)      // PUT request, returns FetchyResponse
+await client.patch(url?, options?)    // PATCH request, returns FetchyResponse
+await client.delete(url?, options?)   // DELETE request, returns FetchyResponse
+await client.head(url?, options?)     // HEAD request, returns Promise<Response>
 
 // Safe mode methods
-await client.safe(url?)       // Returns FetchySafeResponse
-await client.sget(url?)       // Safe GET, returns FetchySafeResponse
-await client.spost(url?)      // Safe POST, returns FetchySafeResponse
-await client.sput(url?)       // Safe PUT, returns FetchySafeResponse
-await client.spatch(url?)     // Safe PATCH, returns FetchySafeResponse
-await client.sdelete(url?)    // Safe DELETE, returns FetchySafeResponse
-await client.shead(url?)      // Safe HEAD, returns Promise<Response | null>
+await client.sfetch(url?, options?)   // Returns FetchySafeResponse
+await client.sget(url?, options?)     // Safe GET, returns FetchySafeResponse
+await client.spost(url?, options?)    // Safe POST, returns FetchySafeResponse
+await client.sput(url?, options?)     // Safe PUT, returns FetchySafeResponse
+await client.spatch(url?, options?)   // Safe PATCH, returns FetchySafeResponse
+await client.sdelete(url?, options?)  // Safe DELETE, returns FetchySafeResponse
+await client.shead(url?, options?)    // Safe HEAD, returns Promise<Response | null>
 ```
 
 All methods can be chained with parsing methods:
 ```ts
 await client.get("/users").json<User[]>();
 await client.post("/create").json<Result>();
-await client.safe("/data").text();
+await client.sfetch("/data").text();
 ```
 
 #### Example
 ```ts
 // Instance usage - reuse configuration
-const client = new Fetchy({
+const client = fy({
   base: "https://api.example.com",
   bearer: "token123",
   timeout: 10,
@@ -193,24 +189,23 @@ if (data !== null) {
 }
 ```
 
-### `fy(options?)` Function
+### `setFetchy(options)`
 
-Shorthand for creating a new `Fetchy` instance.
+Sets global default options for all fetchy instances.
+
+#### Example
 ```ts
-const client = fy({
-  base: "https://api.example.com",
-  bearer: "token"
+import { setFetchy, fetchy } from "@scirexs/fetchy";
+
+// Set global defaults
+setFetchy({
+  timeout: 30,
+  retry: { maxAttempts: 5 },
+  bearer: "global-token"
 });
 
-const user = await client.get("/user").json<User>();
-```
-
-Equivalent to:
-```ts
-const client = new Fetchy({
-  base: "https://api.example.com",
-  bearer: "token"
-});
+// All subsequent requests use these defaults
+await fetchy("https://api.example.com/data");
 ```
 
 ## Configuration
@@ -329,7 +324,7 @@ if (response === null) {
 }
 
 // Safe parsing methods - return null on error
-const data = await fetchy("https://api.example.com/data").json<Data>();
+const data = await sfetchy("https://api.example.com/data").json<Data>();
 if (data !== null) {
   // Process data
 }
@@ -346,6 +341,19 @@ const response = await fetchy("https://api.example.com/data", {
 if (!response.ok) {
   console.error("Request failed");
 }
+```
+
+## Compatibility with Native Fetch
+
+Designed for easy migration back to native `fetch` if needed, minimizing maintenance risk.
+```ts
+// If this library is discontinued, simply delete these declarations
+// to fall back to native fetch with minimal code changes.
+// import { fetchy as fetch, setFetchy } from "@scirexs/fetchy";
+// setFetchy({ native: true });
+
+const options: RequestInit = { method: "POST", body: "hello" };
+const response = await fetch("https://api.example.com/data", options);
 ```
 
 ## Usage Examples
@@ -562,10 +570,10 @@ const data = await fetchy("https://api.example.com/rate-limited", {
   retry: {
     maxAttempts: 5,
     interval: 1,  // Minimum interval if header not present
-    respectHeaders: ["retry-after", "ratelimit-reset"]
+    respectHeaders: ["retry-after", "ratelimit-reset", "x-rateLimit-reset", "x-my-retry-after"]
   }
 }).json();
-// If response has "Retry-After: 10", will wait 10 seconds before retry
+// If response has "X-My-Retry-After: 10", will wait 10 seconds before retry
 ```
 
 ### Type-Safe API Responses
@@ -596,73 +604,6 @@ const result = await sfetchy("https://api.example.com/todos/1")
 if (result !== null && result.success) {
   console.log(result.data.completed);
 }
-```
-
-## Best Practices
-
-### 1. Use Base URL for API Clients
-```ts
-const api = fy({
-  base: "https://api.example.com",
-  bearer: process.env.API_TOKEN,
-  timeout: 10
-});
-
-// All requests are relative to base
-await api.get("/users").json();
-await api.post("/posts", { body: data }).json();
-```
-
-### 2. Choose Safe vs. Throwing Behavior
-```ts
-// For critical operations: use regular methods (throws on error)
-try {
-  const result = await fetchy(url).json();
-  // Process result
-} catch (error) {
-  // Handle error explicitly
-}
-
-// For optional data: use safe methods (returns null)
-const data = await fetchy(url).sjson();
-if (data !== null) {
-  // Process data
-}
-// Continue regardless of result
-```
-
-### 3. Configure Retry for Resilience
-```ts
-// Aggressive retry for critical operations
-const result = await fetchy(url, {
-  retry: {
-    maxAttempts: 5,
-    interval: 2,
-    maxInterval: 30,
-    retryOnTimeout: true
-  }
-}).json();
-
-// No retry for operations that must be fast
-const data = await fetchy(url, {
-  retry: false,
-  timeout: 2
-}).json();
-```
-
-### 4. Use Method Shortcuts for Clarity
-```ts
-const api = fy({ base: "https://api.example.com" });
-
-// Clear and concise
-await api.get("/users").json();
-await api.post("/users", { body: newUser }).json();
-await api.delete("/users/123");
-
-// Instead of
-await api.fetch("/users", { method: "GET" }).json();
-await api.fetch("/users", { method: "POST", body: newUser }).json();
-await api.fetch("/users/123", { method: "DELETE" });
 ```
 
 ## License
