@@ -1,8 +1,9 @@
 # fetchy
 
-[![npm version](https://img.shields.io/npm/v/%40scirexs%2Ffetchy)](https://www.npmjs.com/package/@scirexs/fetchy)
-[![JSR](https://img.shields.io/jsr/v/%40scirexs/fetchy)](https://jsr.io/@scirexs/fetchy)
+[![npm version](https://img.shields.io/npm/v/@scirexs/fetchy)](https://www.npmjs.com/package/@scirexs/fetchy)
+[![JSR](https://img.shields.io/jsr/v/@scirexs/fetchy)](https://jsr.io/@scirexs/fetchy)
 [![license](https://img.shields.io/github/license/scirexs/fetchy)](https://github.com/scirexs/fetchy/blob/main/LICENSE)
+[![size](https://deno.bundlejs.com/badge?q=@scirexs/fetchy)](https://bundlejs.com/?q=@scirexs/fetchy)
 
 A lightweight thin fetch wrapper with built-in retry logic, timeout handling, and automatic body parsing. Works in Deno, Node.js, and modern browsers.
 
