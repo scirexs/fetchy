@@ -1,5 +1,4 @@
 export {
-  _assign,
   _buildOption,
   _cloneRequestF,
   _correctNumber,
@@ -16,16 +15,12 @@ export {
   _getOptions,
   _getRequestInit,
   _getRetryOption,
-  _handleByNative,
   _includeStream,
   _isBool,
-  _isHttpError,
   _isJSONObject,
-  _isNoHeader,
   _isNumber,
   _isPlain,
   _isRequest,
-  _isStream,
   _isString,
   _main,
   _makeFetchyResponse,
@@ -44,16 +39,6 @@ export {
 import type { Fetchy, FetchyBody, FetchyOptions, FetchyResponse, FetchySafeResponse, RetryOptions } from "./types.ts";
 
 /*=============== Constant Values ===============*/
-const MGET = "GET";
-const MHEAD = "HEAD";
-const MPOST = "POST";
-const MPUT = "PUT";
-const MPATCH = "PATCH";
-const MDELETE = "DELETE";
-const MFETCH = "fetch";
-const H_ACCEPT = "Accept";
-const H_CTYPE = "Content-Type";
-const MIME_JSON = "application/json";
 /** Default configuration values for fetchy. */
 const _DEFAULT: Options = {
   ztimeout: 15,
@@ -68,11 +53,11 @@ const _DEFAULT: Options = {
   znative: false,
 } as const;
 /** HTTP methods that do not have idempotency. */
-const _NO_IDEM = [MPOST, MPATCH, "CONNECT"];
+const _NO_IDEM = ["POST", "PATCH", "CONNECT"];
 /** Additional methods for Promise-like interface. */
 const _METHODS = ["text", "json", "bytes", "blob", "arrayBuffer", "formData"] as const;
 /** methods for Fetchy. */
-const _FETCHY = [MFETCH, MGET, MHEAD, MPOST, MPUT, MPATCH, MDELETE];
+const _FETCHY = ["fetch", "get", "head", "post", "put", "patch", "delete"];
 
 /*=============== Internal Types ================*/
 /** Internal normalized options used throughout the fetch process. */
@@ -157,7 +142,7 @@ class HTTPStatusError extends Error {
  * ```
  */
 function fy(options?: FetchyOptions): Fetchy {
-  const result = _assign({}, options);
+  const result = Object.assign({}, options);
   _genMethods(result);
   _genMethods(result, true);
   return result as Fetchy;
@@ -231,7 +216,7 @@ function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): 
  *
  * // POST request with JSON body and authentication
  * const result = await fetchy("https://api.example.com/create", {
- *   method: MPOST,
+ *   method: "POST",
  *   body: { name: "John", age: 30 },
  *   bearer: "your-token-here"
  * }).json();
@@ -310,10 +295,6 @@ function _isNumber(v: unknown): v is number {
 function _isBool(v: unknown): v is boolean {
   return typeof v === "boolean";
 }
-/** Type guard: checks if value is a ReadableStream. @internal */
-function _isStream(v: unknown): v is ReadableStream {
-  return v instanceof ReadableStream;
-}
 /** Type guard: checks if value is a Request. @internal */
 function _isRequest(v: unknown): v is Request {
   return v instanceof Request;
@@ -321,11 +302,6 @@ function _isRequest(v: unknown): v is Request {
 /** Type guard: checks if value is a plain object (not array, null, or other object types). @internal */
 function _isPlain(v: unknown): v is object {
   return Boolean(v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype);
-}
-/** Corrects a number to be non-negative, using default if invalid. @internal */
-// deno-lint-ignore ban-types
-function _assign<T extends {}>(target: T, source: unknown) {
-  return Object.assign(target, source);
 }
 /** Corrects a number to be non-negative, using default if invalid. @internal */
 function _correctNumber(dflt: number, num?: number): number {
@@ -336,14 +312,14 @@ function _getRequestInit(url?: InputArg, options?: FetchyOptions): RequestInit {
   const { method, body, timeout, retry, bearer, native, jitter, headers, signal, ...rest } = options ?? {};
   return {
     headers: _getHeaders(options, _isRequest(url) ? url.headers : null),
-    method: method ? method.toUpperCase() : _isRequest(url) ? url.method : body == void 0 ? MGET : MPOST,
+    method: method ? method.toUpperCase() : _isRequest(url) ? url.method : body == void 0 ? "GET" : "POST",
     ..._getBody(body),
     ...rest,
   };
 }
 /** Converts FetchyBody to standard BodyInit format. @internal */
 function _getBody(body?: FetchyBody): Record<string, BodyInit> | null {
-  return _isStream(body) ? null : { body: _isJSONObject(body) ? JSON.stringify(body) : body as BodyInit };
+  return body instanceof ReadableStream ? null : { body: _isJSONObject(body) ? JSON.stringify(body) : body as BodyInit };
 }
 /** Checks if value should be treated as JSON for serialization. @internal */
 function _isJSONObject(arg?: FetchyBody): boolean {
@@ -352,27 +328,21 @@ function _isJSONObject(arg?: FetchyBody): boolean {
 /** Constructs request headers with automatic Content-Type and Authorization. @internal */
 function _getHeaders(options?: FetchyOptions, reqHeaders?: Headers | null): Headers {
   const headers = new Headers(options?.headers);
-  if (_isNoHeader(H_ACCEPT, headers, reqHeaders)) headers.set(H_ACCEPT, `${MIME_JSON}, text/plain`);
-  if (_isNoHeader(H_CTYPE, headers, reqHeaders)) {
+  if (!headers.has("Accept") && !reqHeaders?.has("Accept")) headers.set("Accept", "application/json, text/plain");
+  if (!headers.has("Content-Type") && !reqHeaders?.has("Content-Type")) {
     const type = _getContentType(options?.body);
-    if (type) headers.set(H_CTYPE, type);
+    if (type) headers.set("Content-Type", type);
   }
   if (options?.bearer) headers.set("Authorization", `Bearer ${options.bearer}`);
   return headers;
 }
-/** Checks if header is absent in both option headers and request headers. @internal */
-function _isNoHeader(name: string, optionHeader: Headers, reqHeaders?: Headers | null): boolean {
-  return !optionHeader.has(name) && !reqHeaders?.has(name);
-}
 /** Determines Content-Type header based on body type. @internal */
 function _getContentType(body?: FetchyBody): string {
-  if (_isJSONObject(body)) return MIME_JSON;
-  return _handleByNative(body) ? "" : "application/octet-stream";
-}
-/** Checks if Content-Type should be handled by native fetch. @internal */
-function _handleByNative(body?: FetchyBody): boolean {
+  if (_isJSONObject(body)) return "application/json";
   return body == void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams ||
-    !!(body instanceof Blob && body.type);
+      (body instanceof Blob && !!body.type)
+    ? ""
+    : "application/octet-stream";
 }
 /** Extracts retry-related options with defaults. @internal */
 function _getRetryOption(init: RequestInit, options?: RetryOptions | false): InternalRetry {
@@ -416,10 +386,6 @@ async function _wait(sec: number, random: boolean = false) {
   const delay = Math.trunc((random ? Math.random() : 1) * sec * 1000);
   await new Promise((resolve) => setTimeout(resolve, delay));
 }
-/** Checks if HTTP status code indicates an error. @internal */
-function _isHttpError(stat: number): boolean {
-  return stat >= 400 || stat < 100;
-}
 /** Determines whether to retry based on conditions and waits before next attempt. @internal */
 async function _shouldRetry(count: number, opts: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
   if (opts.znoIdempotent || count >= opts.zmaxAttempts - 1 || !fn) return false;
@@ -457,8 +423,8 @@ function _parseRetryHeader(value?: string | null): number {
 }
 /** Creates new Request with ReadableStream body if present in options. @internal */
 function _includeStream(req: Request, opts: Options): Request {
-  if (!_isStream(opts.zbody)) return req;
-  const method = [MGET, MHEAD].includes(req.method) ? MPOST : req.method;
+  if (!(opts.zbody instanceof ReadableStream)) return req;
+  const method = ["GET", "HEAD"].includes(req.method) ? "POST" : req.method;
   return new Request(req, { method, body: opts.zbody });
 }
 /** Creates Request object from various input types. @internal */
@@ -487,7 +453,7 @@ async function _fetchWithRetry(url: InputArg | undefined, init: RequestInit, opt
       if (i === 0) creq = _cloneRequestF(_includeStream(_createRequest(opts, url), opts));
       const resp = await _fetchWithJitter(await creq!(), init, opts);
       if (await _shouldRetry(i, opts, resp, creq)) continue;
-      if (_isHttpError(resp.status) && !opts.znative) throw new HTTPStatusError(resp);
+      if ((resp.status >= 400 || resp.status < 100) && !opts.znative) throw new HTTPStatusError(resp);
       return resp;
     } catch (e) {
       if (await _shouldRetry(i, opts, e, creq)) continue;
@@ -506,7 +472,7 @@ async function _fetchWithJitter(req: Request, init: RequestInit, opts: Options):
 }
 /** Creates promise-like object with convenience parsing methods. @internal */
 function _makeFetchyResponse(resp: Promise<Response | null>, safe: boolean): FetchyResponse | FetchySafeResponse {
-  return _assign(
+  return Object.assign(
     resp,
     Object.fromEntries([
       ...(
@@ -520,12 +486,12 @@ function _makeFetchyResponse(resp: Promise<Response | null>, safe: boolean): Fet
   ) as FetchyResponse | FetchySafeResponse;
 }
 function _genMethods(obj: object, safe?: boolean) {
-  for (const m of _FETCHY) {
-    const name = (safe ? "s" : "") + m.toLowerCase();
+  for (const method of _FETCHY) {
+    const name = (safe ? "s" : "") + method;
     // deno-lint-ignore no-explicit-any
     (obj as any)[name] = function (this: Fetchy, url?: InputArg, opts?: FetchyOptions) {
-      const o = m === MFETCH ? _buildOption(this, opts) : _buildOption(this, opts, m);
-      return safe ? sfetchy(url, o) : fetchy(url, o);
+      const options = method === "fetch" ? _buildOption(this, opts) : _buildOption(this, opts, method);
+      return safe ? sfetchy(url, options) : fetchy(url, options);
     };
   }
 }

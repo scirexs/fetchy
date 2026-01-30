@@ -9,7 +9,6 @@ import {
 } from "jsr:@std/assert@^1.0.16";
 import { assertSpyCalls, stub } from "jsr:@std/testing@^1.0.16/mock";
 import {
-  _assign,
   _buildOption,
   _cloneRequestF,
   _correctNumber,
@@ -26,16 +25,12 @@ import {
   _getOptions,
   _getRequestInit,
   _getRetryOption,
-  _handleByNative,
   _includeStream,
   _isBool,
-  _isHttpError,
   _isJSONObject,
-  _isNoHeader,
   _isNumber,
   _isPlain,
   _isRequest,
-  _isStream,
   _isString,
   _main,
   _makeFetchyResponse,
@@ -116,20 +111,6 @@ Deno.test("_isBool", async (t) => {
   });
 });
 
-Deno.test("_isStream", async (t) => {
-  await t.step("returns true for ReadableStream", () => {
-    const stream = new ReadableStream();
-    assertEquals(_isStream(stream), true);
-  });
-
-  await t.step("returns false for non-ReadableStream", () => {
-    assertEquals(_isStream({}), false);
-    assertEquals(_isStream([]), false);
-    assertEquals(_isStream(null), false);
-    assertEquals(_isStream(new Response()), false);
-  });
-});
-
 Deno.test("_isRequest", async (t) => {
   await t.step("returns true for Request", () => {
     const req = new Request("https://example.com");
@@ -174,23 +155,6 @@ Deno.test("_isJSONObject", async (t) => {
     assertEquals(_isJSONObject(null), false);
     assertEquals(_isJSONObject(undefined), false);
     assertEquals(_isJSONObject(new FormData()), false);
-  });
-});
-
-/*=============== Object Utilities =============*/
-Deno.test("_assign", async (t) => {
-  await t.step("returns assigned object", () => {
-    type Test = { foo: string; bar: () => string };
-    const target: Partial<Test> = {};
-    const source = {
-      foo: "foo",
-      bar() {
-        return "bar";
-      },
-    };
-    _assign(target, source);
-    assertEquals(target.foo, "foo");
-    assertEquals(target.bar?.(), "bar");
   });
 });
 
@@ -392,47 +356,6 @@ Deno.test("_getContentType", async (t) => {
   });
 });
 
-Deno.test("_handleByNative", async (t) => {
-  await t.step("returns true for undefined", () => {
-    assertEquals(_handleByNative(undefined), true);
-  });
-
-  await t.step("returns true for string", () => {
-    assertEquals(_handleByNative("text"), true);
-  });
-
-  await t.step("returns true for FormData", () => {
-    assertEquals(_handleByNative(new FormData()), true);
-  });
-
-  await t.step("returns true for URLSearchParams", () => {
-    assertEquals(_handleByNative(new URLSearchParams()), true);
-  });
-
-  await t.step("returns true for Blob with type", () => {
-    const blob = new Blob(["data"], { type: "text/plain" });
-    assertEquals(_handleByNative(blob), true);
-  });
-
-  await t.step("returns false for Blob without type", () => {
-    const blob = new Blob(["data"]);
-    assertEquals(_handleByNative(blob), false);
-  });
-
-  await t.step("returns false for objects", () => {
-    assertEquals(_handleByNative({ key: "value" }), false);
-    assertEquals(_handleByNative([1, 2, 3]), false);
-  });
-
-  await t.step("returns false for ArrayBuffer", () => {
-    assertEquals(_handleByNative(new ArrayBuffer(8)), false);
-  });
-
-  await t.step("returns false for ReadableStream", () => {
-    assertEquals(_handleByNative(new ReadableStream()), false);
-  });
-});
-
 Deno.test("_getHeaders", async (t) => {
   await t.step("sets default Accept header", () => {
     const headers = _getHeaders();
@@ -473,36 +396,6 @@ Deno.test("_getHeaders", async (t) => {
     });
     const headers = _getHeaders({ body: { key: "value" } }, req.headers);
     assertEquals(headers.has("Content-Type"), false);
-  });
-});
-
-Deno.test("_isNoHeader", async (t) => {
-  await t.step("returns true when header not in either", () => {
-    const optHeaders = new Headers();
-    const reqHeaders = new Headers();
-    assertEquals(_isNoHeader("Accept", optHeaders, reqHeaders), true);
-  });
-
-  await t.step("returns false when header in option headers", () => {
-    const optHeaders = new Headers({ "Accept": "text/html" });
-    const reqHeaders = new Headers();
-    assertEquals(_isNoHeader("Accept", optHeaders, reqHeaders), false);
-  });
-
-  await t.step("returns false when header in request headers", () => {
-    const optHeaders = new Headers();
-    const reqHeaders = new Headers({ "Accept": "text/html" });
-    assertEquals(_isNoHeader("Accept", optHeaders, reqHeaders), false);
-  });
-
-  await t.step("returns true when reqHeaders is null", () => {
-    const optHeaders = new Headers();
-    assertEquals(_isNoHeader("Accept", optHeaders, null), true);
-  });
-
-  await t.step("returns false when in option headers and reqheader is undefined", () => {
-    const optHeaders = new Headers({ "Accept": "text/html" });
-    assertEquals(_isNoHeader("Accept", optHeaders), false);
   });
 });
 
@@ -766,43 +659,6 @@ Deno.test("_wait", async (t) => {
     const elapsed = Date.now() - start;
     assertEquals(elapsed >= 90, true);
     assertEquals(elapsed <= 120, true);
-  });
-});
-
-/*=============== HTTP Error Checking ==========*/
-Deno.test("_isHttpError", async (t) => {
-  await t.step("returns true for 4xx status codes", () => {
-    assertEquals(_isHttpError(400), true);
-    assertEquals(_isHttpError(429), true);
-    assertEquals(_isHttpError(499), true);
-  });
-
-  await t.step("returns true for 5xx status codes", () => {
-    assertEquals(_isHttpError(500), true);
-    assertEquals(_isHttpError(503), true);
-    assertEquals(_isHttpError(599), true);
-  });
-
-  await t.step("returns true for status codes below 100", () => {
-    assertEquals(_isHttpError(0), true);
-    assertEquals(_isHttpError(99), true);
-  });
-
-  await t.step("returns false for 2xx status codes", () => {
-    assertEquals(_isHttpError(200), false);
-    assertEquals(_isHttpError(201), false);
-    assertEquals(_isHttpError(204), false);
-  });
-
-  await t.step("returns false for 3xx status codes", () => {
-    assertEquals(_isHttpError(301), false);
-    assertEquals(_isHttpError(302), false);
-    assertEquals(_isHttpError(304), false);
-  });
-
-  await t.step("returns false for 1xx status codes", () => {
-    assertEquals(_isHttpError(100), false);
-    assertEquals(_isHttpError(101), false);
   });
 });
 
@@ -1799,12 +1655,19 @@ Deno.test("_main", async (t) => {
     const mockFetch = stub(
       globalThis,
       "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
+      async (req, _) => {
+        if (req instanceof Request) {
+          const result = await req.body?.getReader().read();
+          const data = new TextDecoder().decode(result?.value);
+          assertEquals(data, "test_data");
+        }
+        return new Response("ok", { status: 200 });
+      },
     );
     try {
       const stream = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode("data"));
+          controller.enqueue(new TextEncoder().encode("test_data"));
           controller.close();
         },
       });
