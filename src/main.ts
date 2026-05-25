@@ -40,17 +40,17 @@ import type { Fetchy, FetchyBody, FetchyOptions, FetchyResponse, FetchySafeRespo
 
 /*=============== Constant Values ===============*/
 /** Default configuration values for fetchy. */
-const _DEFAULT: Omit<Options, "zsignal"> = {
-  ztimeout: 15,
-  zjitter: 0,
-  zinterval: 3,
-  zmaxInterval: 30,
-  zmaxAttempts: 3,
-  zonTimeout: true,
-  znoIdempotent: false,
-  zstatusCodes: Object.freeze([500, 502, 503, 504, 408, 429]),
-  zrespects: Object.freeze(["retry-after", "ratelimit-reset", "x-ratelimit-reset"]),
-  znative: false,
+const _DEFAULT: Omit<Options, "signal"> = {
+  timeout: 15,
+  jitter: 0,
+  interval: 3,
+  maxInterval: 30,
+  maxAttempts: 3,
+  onTimeout: true,
+  noIdempotent: false,
+  statusCodes: Object.freeze([500, 502, 503, 504, 408, 429]),
+  respects: Object.freeze(["retry-after", "ratelimit-reset", "x-ratelimit-reset"]),
+  native: false,
 } as const;
 /** HTTP methods that do not have idempotency. */
 const _NO_IDEM: readonly string[] = ["POST", "PATCH", "CONNECT"];
@@ -62,25 +62,25 @@ const _FETCHY = ["fetch", "get", "head", "post", "put", "patch", "delete"] as co
 /*=============== Internal Types ================*/
 /** Internal normalized options used throughout the fetch process. */
 interface Options {
-  ztimeout: number;
-  zjitter: number;
-  zinterval: number;
-  zmaxInterval: number;
-  zmaxAttempts: number;
-  zonTimeout: boolean;
-  znoIdempotent: boolean;
-  zstatusCodes: readonly number[];
-  zrespects: readonly string[];
-  znative: boolean;
-  zsignal: AbortSignal;
-  zbody?: FetchyBody;
+  timeout: number;
+  jitter: number;
+  interval: number;
+  maxInterval: number;
+  maxAttempts: number;
+  onTimeout: boolean;
+  noIdempotent: boolean;
+  statusCodes: readonly number[];
+  respects: readonly string[];
+  native: boolean;
+  signal: AbortSignal;
+  body?: FetchyBody;
 }
 /** URL argument type for fetchy functions. */
 type InputArg = string | URL | Request | null;
 /** Internal retry-related options extracted from RetryOptions. */
 type InternalRetry = Pick<
   Options,
-  "zinterval" | "zmaxInterval" | "zmaxAttempts" | "zonTimeout" | "znoIdempotent" | "zstatusCodes" | "zrespects"
+  "interval" | "maxInterval" | "maxAttempts" | "onTimeout" | "noIdempotent" | "statusCodes" | "respects"
 >;
 
 /*=============== Main Codes ====================*/
@@ -350,26 +350,26 @@ function _getContentType(body?: FetchyBody): string {
 }
 /** Extracts retry-related options with defaults. @internal */
 function _getRetryOption(init: RequestInit, options?: RetryOptions | false): InternalRetry {
-  if (options === false) return { ..._DEFAULT, zmaxAttempts: 1 };
+  if (options === false) return { ..._DEFAULT, maxAttempts: 1 };
   return {
-    zmaxAttempts: Math.max(_correctNumber(_DEFAULT.zmaxAttempts, options?.maxAttempts), 1),
-    zinterval: Math.max(_correctNumber(_DEFAULT.zinterval, options?.interval), 0.01),
-    zmaxInterval: Math.max(_correctNumber(_DEFAULT.zmaxInterval, options?.maxInterval), 1),
-    zonTimeout: options?.retryOnTimeout ?? _DEFAULT.zonTimeout,
-    znoIdempotent: options?.idempotentOnly ? _NO_IDEM.includes((init.method ?? "").toUpperCase()) : false,
-    zstatusCodes: options?.statusCodes ?? _DEFAULT.zstatusCodes,
-    zrespects: options?.respectHeaders ?? _DEFAULT.zrespects,
+    maxAttempts: Math.max(_correctNumber(_DEFAULT.maxAttempts, options?.maxAttempts), 1),
+    interval: Math.max(_correctNumber(_DEFAULT.interval, options?.interval), 0.01),
+    maxInterval: Math.max(_correctNumber(_DEFAULT.maxInterval, options?.maxInterval), 1),
+    onTimeout: options?.retryOnTimeout ?? _DEFAULT.onTimeout,
+    noIdempotent: options?.idempotentOnly ? _NO_IDEM.includes((init.method ?? "").toUpperCase()) : false,
+    statusCodes: options?.statusCodes ?? _DEFAULT.statusCodes,
+    respects: options?.respectHeaders ?? _DEFAULT.respects,
   };
 }
 /** Converts FetchyOptions to internal Options format with validated values. @internal */
 function _getOptions(req: Request, init: RequestInit, options?: FetchyOptions): Options {
   return {
     ..._getRetryOption(init, options?.retry),
-    ztimeout: _correctNumber(_DEFAULT.ztimeout, options?.timeout),
-    zjitter: _correctNumber(_DEFAULT.zjitter, options?.jitter),
-    znative: options?.native ?? _DEFAULT.znative,
-    zsignal: _mergeSignals(req.signal, options?.signal),
-    zbody: options?.body,
+    timeout: _correctNumber(_DEFAULT.timeout, options?.timeout),
+    jitter: _correctNumber(_DEFAULT.jitter, options?.jitter),
+    native: options?.native ?? _DEFAULT.native,
+    signal: _mergeSignals(req.signal, options?.signal),
+    body: options?.body,
   };
 }
 /** Merges multiple AbortSignals into one. @internal */
@@ -378,8 +378,8 @@ function _mergeSignals(s1: AbortSignal, s2?: AbortSignal | null): AbortSignal {
 }
 /** Creates timeout signal and merges with existing signal. @internal */
 function _withTimeout(options: Options): AbortSignal {
-  if (options.ztimeout <= 0) return options.zsignal;
-  return _mergeSignals(AbortSignal.timeout(options.ztimeout * 1000), options.zsignal);
+  if (options.timeout <= 0) return options.signal;
+  return _mergeSignals(AbortSignal.timeout(options.timeout * 1000), options.signal);
 }
 /** Waits for specified seconds with optional randomization. @internal */
 async function _wait(sec: number, random: boolean = false) {
@@ -389,15 +389,15 @@ async function _wait(sec: number, random: boolean = false) {
 }
 /** Calculates next retry interval using exponential backoff or response headers. @internal */
 function _getNextInterval(count: number, options: Options, headers?: Headers): number {
-  return options.zrespects.some((x) => headers?.has(x))
-    ? _findRetryHeader(options, headers!) ?? options.zinterval
-    : Math.min(options.zinterval * 2 ** count, options.zmaxInterval);
+  return options.respects.some((x) => headers?.has(x))
+    ? _findRetryHeader(options, headers!) ?? options.interval
+    : Math.min(options.interval * 2 ** count, options.maxInterval);
 }
 /** Finds and parses retry timing from response headers. @internal */
 function _findRetryHeader(options: Options, headers: Headers): number | undefined {
-  for (const name of options.zrespects) {
+  for (const name of options.respects) {
     const value = Math.trunc(_parseRetryHeader(headers.get(name)?.trim()));
-    if (!Number.isNaN(value)) return Math.max(value, options.zinterval);
+    if (!Number.isNaN(value)) return Math.max(value, options.interval);
   }
 }
 /** Parses retry header value to seconds. @internal */
@@ -411,27 +411,27 @@ function _parseRetryHeader(value?: string | null): number {
 /** Waits for next retry interval unless over max interval. @internal */
 async function _waitInterval(count: number, options: Options, headers?: Headers): Promise<boolean> {
   const interval = _getNextInterval(count, options, headers);
-  if (interval > options.zmaxInterval) return false;
+  if (interval > options.maxInterval) return false;
   await _wait(interval);
   return true;
 }
 /** Determines whether to retry based on conditions and waits before next attempt. @internal */
 async function _shouldRetry(count: number, options: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
-  if (options.znoIdempotent || count >= options.zmaxAttempts - 1 || !fn) return false;
+  if (options.noIdempotent || count >= options.maxAttempts - 1 || !fn) return false;
   if (r instanceof Response) {
-    if (options.znative || !options.zstatusCodes.includes(r.status)) return false;
+    if (options.native || !options.statusCodes.includes(r.status)) return false;
 
     return await _waitInterval(count, options, r.headers);
   } else {
-    if (!(r instanceof Error && r.name == "TimeoutError" && options.zonTimeout)) return false;
+    if (!(r instanceof Error && r.name == "TimeoutError" && options.onTimeout)) return false;
     return await _waitInterval(count, options);
   }
 }
 /** Creates new Request with ReadableStream body if present in options. @internal */
 function _includeStream(req: Request, options: Options): Request {
-  if (!(options.zbody instanceof ReadableStream)) return req;
+  if (!(options.body instanceof ReadableStream)) return req;
   const method = ["GET", "HEAD"].includes(req.method) ? "POST" : req.method;
-  return new Request(req, { method, body: options.zbody });
+  return new Request(req, { method, body: options.body });
 }
 /** Creates request cloning function with abort handling. @internal */
 function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
@@ -453,7 +453,7 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
       if (i === 0) creq = _cloneRequestF(_includeStream(req, options));
       const res = await _fetchWithJitter(await creq!(), init, options);
       if (await _shouldRetry(i, options, res, creq)) continue;
-      if ((res.status >= 400 || res.status < 100) && !options.znative) throw new HTTPStatusError(res);
+      if ((res.status >= 400 || res.status < 100) && !options.native) throw new HTTPStatusError(res);
       cancel = true;
       return res;
     } catch (e) {
@@ -467,7 +467,7 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
 }
 /** Executes fetch with initial jitter delay. @internal */
 async function _fetchWithJitter(req: Request, init: RequestInit, options: Options): Promise<Response> {
-  await _wait(options.zjitter, true);
+  await _wait(options.jitter, true);
   return await fetch(req, { ...init, signal: _withTimeout(options) });
 }
 /** Creates promise-like object with convenience parsing methods. @internal */

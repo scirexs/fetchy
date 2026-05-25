@@ -10,7 +10,7 @@ A lightweight thin fetch wrapper with built-in retry logic, timeout handling, an
 ## Features
 
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
-- **Lightweight** - Bundle size is ~5KB uncompressed, ~2KB gzipped, zero dependencies
+- **Lightweight** - Bundle size is ~5KB uncompressed, ~3KB gzipped, zero dependencies
 - **Native Fetch Compatible** - Thin abstraction layer, easy migration back to native fetch
 - **Promise-like Interface** - Chain parsing methods directly on fetch results
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
