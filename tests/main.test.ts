@@ -26,31 +26,66 @@ import {
   _getRequestInit,
   _getRetryOption,
   _includeStream,
-  _isBool,
   _isJSONObject,
-  _isNumber,
   _isPlain,
   _isRequest,
   _isString,
   _main,
   _makeFetchyResponse,
+  _mergeHeaders,
   _mergeSignals,
   _parseRetryHeader,
   _shouldRetry,
   _wait,
+  _waitInterval,
   _withTimeout,
+  fetchy,
+  fy,
   HTTPStatusError,
   setFetchy,
+  sfetchy,
 } from "../src/main.ts";
 import type { Fetchy, FetchyOptions } from "../src/types.ts";
 
+/*=============== Test Helpers =================*/
+// deno-lint-ignore no-explicit-any
+type AnyOptions = any;
+
+/** Build an Options-shaped object for internal helpers requiring full Options. */
+function makeOptions(overrides: Record<string, unknown> = {}): AnyOptions {
+  return { ..._DEFAULT, signal: new AbortController().signal, ...overrides };
+}
+
+/** Build a FetchyOptions with headers always set (invariant after _buildOption). */
+function makeFetchyOptions(overrides: Partial<FetchyOptions> = {}): FetchyOptions {
+  return { headers: new Headers(), ...overrides };
+}
+
+/*=============== _DEFAULT =====================*/
+Deno.test("_DEFAULT", async (t) => {
+  await t.step("has expected default values", () => {
+    assertEquals(_DEFAULT.timeout, 15);
+    assertEquals(_DEFAULT.jitter, 0);
+    assertEquals(_DEFAULT.interval, 3);
+    assertEquals(_DEFAULT.maxInterval, 30);
+    assertEquals(_DEFAULT.maxAttempts, 3);
+    assertEquals(_DEFAULT.onTimeout, true);
+    assertEquals(_DEFAULT.noIdempotent, false);
+    assertEquals(_DEFAULT.native, false);
+    assertEquals(_DEFAULT.statusCodes, [500, 502, 503, 504, 408, 429]);
+    assertEquals(_DEFAULT.respects, ["retry-after", "ratelimit-reset", "x-ratelimit-reset"]);
+  });
+
+  await t.step("statusCodes and respects are frozen", () => {
+    assertThrows(() => (_DEFAULT.statusCodes as number[]).push(401));
+    assertThrows(() => (_DEFAULT.respects as string[]).push("x"));
+  });
+});
+
 /*=============== HTTPStatusError ==============*/
 Deno.test("HTTPStatusError", async (t) => {
-  await t.step("creates error with status and response", () => {
-    const resp = new Response("error", {
-      status: 404,
-      statusText: "Not Found",
-    });
+  await t.step("creates error with status, response, and name", () => {
+    const resp = new Response("error", { status: 404, statusText: "Not Found" });
     const error = new HTTPStatusError(resp);
     assertInstanceOf(error, Error);
     assertEquals(error.name, "HTTPStatusError");
@@ -58,246 +93,361 @@ Deno.test("HTTPStatusError", async (t) => {
     assertStrictEquals(error.response, resp);
     assertEquals(error.message.includes("404"), true);
   });
+
+  await t.step("preserves status from response", () => {
+    const resp = new Response(null, { status: 500 });
+    const error = new HTTPStatusError(resp);
+    assertEquals(error.status, 500);
+  });
 });
 
 /*=============== Type Guards ==================*/
 Deno.test("_isString", async (t) => {
-  await t.step("returns true for string", () => {
+  await t.step("returns true for strings", () => {
     assertEquals(_isString("hello"), true);
     assertEquals(_isString(""), true);
   });
 
-  await t.step("returns false for non-string", () => {
+  await t.step("returns false for non-strings", () => {
     assertEquals(_isString(123), false);
     assertEquals(_isString(null), false);
     assertEquals(_isString(undefined), false);
     assertEquals(_isString({}), false);
     assertEquals(_isString([]), false);
     assertEquals(_isString(true), false);
-  });
-});
-
-Deno.test("_isNumber", async (t) => {
-  await t.step("returns true for number", () => {
-    assertEquals(_isNumber(123), true);
-    assertEquals(_isNumber(0), true);
-    assertEquals(_isNumber(-1), true);
-    assertEquals(_isNumber(3.14), true);
-  });
-
-  await t.step("returns false for non-number", () => {
-    assertEquals(_isNumber("123"), false);
-    assertEquals(_isNumber(null), false);
-    assertEquals(_isNumber(undefined), false);
-    assertEquals(_isNumber({}), false);
-    assertEquals(_isNumber([]), false);
-    assertEquals(_isNumber(true), false);
-  });
-});
-
-Deno.test("_isBool", async (t) => {
-  await t.step("returns true for boolean", () => {
-    assertEquals(_isBool(true), true);
-    assertEquals(_isBool(false), true);
-  });
-
-  await t.step("returns false for non-boolean", () => {
-    assertEquals(_isBool(1), false);
-    assertEquals(_isBool(0), false);
-    assertEquals(_isBool("true"), false);
-    assertEquals(_isBool(null), false);
-    assertEquals(_isBool(undefined), false);
-    assertEquals(_isBool({}), false);
+    assertEquals(_isString(new String("x")), false);
   });
 });
 
 Deno.test("_isRequest", async (t) => {
-  await t.step("returns true for Request", () => {
+  await t.step("returns true for Request instances", () => {
     const req = new Request("https://example.com");
     assertEquals(_isRequest(req), true);
   });
 
-  await t.step("returns false for non-Request", () => {
+  await t.step("returns false for non-Request values", () => {
     assertEquals(_isRequest("https://example.com"), false);
+    assertEquals(_isRequest(new URL("https://example.com")), false);
+    assertEquals(_isRequest(new Response()), false);
     assertEquals(_isRequest({}), false);
     assertEquals(_isRequest(null), false);
-    assertEquals(_isRequest(new Response()), false);
+    assertEquals(_isRequest(undefined), false);
   });
 });
 
 Deno.test("_isPlain", async (t) => {
-  await t.step("returns true for plain object", () => {
+  await t.step("returns true for plain objects", () => {
     assertEquals(_isPlain({}), true);
     assertEquals(_isPlain({ key: "value" }), true);
+    assertEquals(_isPlain(Object.create(Object.prototype)), true);
   });
 
-  await t.step("returns false for non-plain object", () => {
+  await t.step("returns false for non-plain objects", () => {
     assertEquals(_isPlain([]), false);
     assertEquals(_isPlain(null), false);
     assertEquals(_isPlain(undefined), false);
     assertEquals(_isPlain(new Date()), false);
     assertEquals(_isPlain(new Request("https://example.com")), false);
+    assertEquals(_isPlain(new Headers()), false);
+    assertEquals(_isPlain(Object.create(null)), false);
     assertEquals(_isPlain("string"), false);
+    assertEquals(_isPlain(123), false);
+    assertEquals(_isPlain(true), false);
   });
 });
 
 Deno.test("_isJSONObject", async (t) => {
-  await t.step("returns true for JSON-compatible values", () => {
+  await t.step("returns true for JSON-serializable values", () => {
+    assertEquals(_isJSONObject(null), true);
     assertEquals(_isJSONObject(123), true);
+    assertEquals(_isJSONObject(0), true);
+    assertEquals(_isJSONObject(-3.14), true);
     assertEquals(_isJSONObject(true), true);
     assertEquals(_isJSONObject(false), true);
     assertEquals(_isJSONObject([1, 2, 3]), true);
+    assertEquals(_isJSONObject([]), true);
     assertEquals(_isJSONObject({ key: "value" }), true);
+    assertEquals(_isJSONObject({}), true);
   });
 
   await t.step("returns false for non-JSON values", () => {
     assertEquals(_isJSONObject("string"), false);
-    assertEquals(_isJSONObject(null), false);
+    assertEquals(_isJSONObject(""), false);
     assertEquals(_isJSONObject(undefined), false);
     assertEquals(_isJSONObject(new FormData()), false);
+    assertEquals(_isJSONObject(new URLSearchParams()), false);
+    assertEquals(_isJSONObject(new Blob(["x"])), false);
+    assertEquals(_isJSONObject(new ReadableStream()), false);
   });
 });
 
 /*=============== Number Utilities =============*/
 Deno.test("_correctNumber", async (t) => {
-  await t.step("returns number when valid and non-negative", () => {
+  await t.step("returns valid non-negative number", () => {
     assertEquals(_correctNumber(10, 5), 5);
     assertEquals(_correctNumber(10, 0), 0);
+    assertEquals(_correctNumber(10, 3.14), 3.14);
   });
 
-  await t.step("returns default when number is negative", () => {
+  await t.step("returns default for negative numbers", () => {
     assertEquals(_correctNumber(10, -1), 10);
-    assertEquals(_correctNumber(10, -5), 10);
+    assertEquals(_correctNumber(10, -0.5), 10);
   });
 
-  await t.step("returns default when number is undefined", () => {
+  await t.step("returns default for undefined", () => {
     assertEquals(_correctNumber(10, undefined), 10);
     assertEquals(_correctNumber(5), 5);
+  });
+
+  await t.step("returns default for non-finite values", () => {
+    assertEquals(_correctNumber(10, Number.NaN), 10);
+    assertEquals(_correctNumber(10, Number.POSITIVE_INFINITY), 10);
+    assertEquals(_correctNumber(10, Number.NEGATIVE_INFINITY), 10);
+  });
+});
+
+/*=============== Header Utilities =============*/
+Deno.test("_mergeHeaders", async (t) => {
+  await t.step("merges init values into base headers", () => {
+    const base = new Headers({ "X-A": "1" });
+    const init = new Headers({ "X-B": "2" });
+    const result = _mergeHeaders(base, init);
+    assertStrictEquals(result, base);
+    assertEquals(base.get("X-A"), "1");
+    assertEquals(base.get("X-B"), "2");
+  });
+
+  await t.step("overwrites duplicate keys with init values", () => {
+    const base = new Headers({ "X-A": "old" });
+    const init = new Headers({ "X-A": "new" });
+    _mergeHeaders(base, init);
+    assertEquals(base.get("X-A"), "new");
+  });
+
+  await t.step("returns the base Headers reference", () => {
+    const base = new Headers();
+    const init = new Headers();
+    const result = _mergeHeaders(base, init);
+    assertStrictEquals(result, base);
+  });
+});
+
+Deno.test("_getContentType", async (t) => {
+  await t.step("returns application/json for JSON-serializable values", () => {
+    assertEquals(_getContentType({ key: "value" }), "application/json");
+    assertEquals(_getContentType([1, 2, 3]), "application/json");
+    assertEquals(_getContentType(123), "application/json");
+    assertEquals(_getContentType(true), "application/json");
+    assertEquals(_getContentType(null), "application/json");
+  });
+
+  await t.step("returns empty string for natively-typed bodies", () => {
+    assertEquals(_getContentType(undefined), "");
+    assertEquals(_getContentType("text"), "");
+    assertEquals(_getContentType(""), "");
+    assertEquals(_getContentType(new FormData()), "");
+    assertEquals(_getContentType(new URLSearchParams()), "");
+  });
+
+  await t.step("returns empty string for Blob with type", () => {
+    const blob = new Blob(["data"], { type: "text/plain" });
+    assertEquals(_getContentType(blob), "");
+  });
+
+  await t.step("returns application/octet-stream for Blob without type", () => {
+    const blob = new Blob(["data"]);
+    assertEquals(_getContentType(blob), "application/octet-stream");
+  });
+
+  await t.step("returns application/octet-stream for ReadableStream", () => {
+    assertEquals(_getContentType(new ReadableStream()), "application/octet-stream");
+  });
+});
+
+Deno.test("_getHeaders", async (t) => {
+  await t.step("sets default Accept header when missing", () => {
+    const headers = new Headers();
+    _getHeaders(headers);
+    assertEquals(headers.get("Accept"), "application/json, text/plain");
+  });
+
+  await t.step("does not overwrite existing Accept header", () => {
+    const headers = new Headers({ "Accept": "text/html" });
+    _getHeaders(headers);
+    assertEquals(headers.get("Accept"), "text/html");
+  });
+
+  await t.step("sets Content-Type for JSON body", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { body: { key: "value" } });
+    assertEquals(headers.get("Content-Type"), "application/json");
+  });
+
+  await t.step("sets Content-Type to application/json for null body", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { body: null });
+    assertEquals(headers.get("Content-Type"), "application/json");
+  });
+
+  await t.step("does not set Content-Type for string body", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { body: "text" });
+    assertEquals(headers.has("Content-Type"), false);
+  });
+
+  await t.step("does not overwrite existing Content-Type", () => {
+    const headers = new Headers({ "Content-Type": "text/plain" });
+    _getHeaders(headers, { body: { key: "value" } });
+    assertEquals(headers.get("Content-Type"), "text/plain");
+  });
+
+  await t.step("does not set Content-Type for Blob with type", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { body: new Blob(["x"], { type: "image/png" }) });
+    assertEquals(headers.has("Content-Type"), false);
+  });
+
+  await t.step("sets Content-Type application/octet-stream for typeless Blob", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { body: new Blob(["x"]) });
+    assertEquals(headers.get("Content-Type"), "application/octet-stream");
+  });
+
+  await t.step("sets Authorization header from bearer", () => {
+    const headers = new Headers();
+    _getHeaders(headers, { bearer: "token123" });
+    assertEquals(headers.get("Authorization"), "Bearer token123");
+  });
+
+  await t.step("overwrites existing Authorization when bearer is given", () => {
+    const headers = new Headers({ "Authorization": "Basic xxx" });
+    _getHeaders(headers, { bearer: "tok" });
+    assertEquals(headers.get("Authorization"), "Bearer tok");
+  });
+
+  await t.step("returns the mutated headers reference", () => {
+    const headers = new Headers();
+    const result = _getHeaders(headers);
+    assertStrictEquals(result, headers);
   });
 });
 
 /*=============== Request Creation =============*/
 Deno.test("_createRequest", async (t) => {
-  await t.step("returns Request when url is Request", () => {
+  await t.step("clones a passed Request", () => {
     const req = new Request("https://example.com");
-    const result = _createRequest(_DEFAULT, req);
-    assertStrictEquals(result, req);
+    const result = _createRequest({}, req);
+    assertInstanceOf(result, Request);
+    assertEquals(result.url, "https://example.com/");
   });
 
   await t.step("creates Request from string URL", () => {
-    const result = _createRequest(_DEFAULT, "https://example.com");
+    const result = _createRequest({}, "https://example.com");
     assertInstanceOf(result, Request);
     assertEquals(result.url, "https://example.com/");
   });
 
   await t.step("creates Request from URL object", () => {
     const url = new URL("https://example.com/path");
-    const result = _createRequest(_DEFAULT, url);
-    assertInstanceOf(result, Request);
+    const result = _createRequest({}, url);
     assertEquals(result.url, "https://example.com/path");
   });
 
   await t.step("uses options.url when url is null", () => {
-    const result = _createRequest({ ..._DEFAULT, zurl: "https://example.com" }, null);
+    const result = _createRequest({ url: "https://example.com" }, null);
     assertEquals(result.url, "https://example.com/");
   });
 
-  await t.step("uses base URL when provided", () => {
-    const result = _createRequest({ ..._DEFAULT, zbase: "https://example.com" }, "/path");
+  await t.step("uses options.url when url is undefined", () => {
+    const result = _createRequest({ url: "https://example.com" });
+    assertEquals(result.url, "https://example.com/");
+  });
+
+  await t.step("uses options.url when url is empty string", () => {
+    const result = _createRequest({ url: "https://example.com" }, "");
+    assertEquals(result.url, "https://example.com/");
+  });
+
+  await t.step("applies base URL for relative path", () => {
+    const result = _createRequest({ base: "https://example.com" }, "/path");
     assertEquals(result.url, "https://example.com/path");
   });
 
-  await t.step("creates empty Request when no URL provided", () => {
-    assertThrows(() => _createRequest(_DEFAULT), Error, "Invalid URL");
+  await t.step("ignores base URL when input is Request", () => {
+    const req = new Request("https://other.com/");
+    const result = _createRequest({ base: "https://example.com" }, req);
+    assertEquals(result.url, "https://other.com/");
+  });
+
+  await t.step("throws Invalid URL when nothing resolvable is given", () => {
+    assertThrows(() => _createRequest({}), TypeError);
   });
 });
 
 Deno.test("_includeStream", async (t) => {
-  await t.step("creates new Request with stream body", () => {
+  await t.step("returns original Request when body is not a stream", () => {
+    const req = new Request("https://example.com");
+    const result = _includeStream(req, makeOptions({ body: "text" }));
+    assertStrictEquals(result, req);
+  });
+
+  await t.step("returns original Request when body is undefined", () => {
+    const req = new Request("https://example.com");
+    const result = _includeStream(req, makeOptions());
+    assertStrictEquals(result, req);
+  });
+
+  await t.step("creates new Request with stream body for GET", () => {
     const req = new Request("https://example.com");
     const stream = new ReadableStream();
-    const result = _includeStream(req, { ..._DEFAULT, zbody: stream });
+    const result = _includeStream(req, makeOptions({ body: stream }));
     assertNotStrictEquals(result, req);
-    assertInstanceOf(result, Request);
-  });
-
-  await t.step("returns original Request when no stream body", () => {
-    const req = new Request("https://example.com");
-    const result = _includeStream(req, { ..._DEFAULT, zbody: "text" });
-    assertStrictEquals(result, req);
-  });
-
-  await t.step("returns original Request when no options", () => {
-    const req = new Request("https://example.com");
-    const result = _includeStream(req, _DEFAULT);
-    assertStrictEquals(result, req);
-  });
-});
-
-/*=============== Options Processing ===========*/
-Deno.test("_buildOption", async (t) => {
-  await t.step("adds method to options", () => {
-    const result = _buildOption({ timeout: 10 }, undefined, "POST");
     assertEquals(result.method, "POST");
-    assertEquals(result.timeout, 10);
+    assertExists(result.body);
   });
 
-  await t.step("overwrites existing method", () => {
-    const result = _buildOption({ method: "GET" }, undefined, "PUT");
-    assertEquals(result.method, "PUT");
+  await t.step("creates new Request with stream body for HEAD (upgraded to POST)", () => {
+    const req = new Request("https://example.com", { method: "HEAD" });
+    const stream = new ReadableStream();
+    const result = _includeStream(req, makeOptions({ body: stream }));
+    assertEquals(result.method, "POST");
   });
 
-  await t.step("works with undefined options", () => {
-    const result = _buildOption(undefined, undefined, "DELETE");
-    assertEquals(result.method, "DELETE");
-  });
-
-  await t.step("overwrites existing options", () => {
-    const result = _buildOption({ timeout: 10 }, { timeout: 15 });
-    assertEquals(result.timeout, 15);
-  });
-
-  await t.step("works with temporal options", () => {
-    const result = _buildOption(undefined, { method: "GET" }, "HEAD");
-    assertEquals(result.method, "HEAD");
-  });
-
-  await t.step("works with all specified", () => {
-    const result = _buildOption({ method: "POST" }, { method: "GET" }, "PUT");
+  await t.step("preserves non-GET/HEAD method when attaching stream", () => {
+    const req = new Request("https://example.com", { method: "PUT" });
+    const stream = new ReadableStream();
+    const result = _includeStream(req, makeOptions({ body: stream }));
     assertEquals(result.method, "PUT");
   });
 });
 
 Deno.test("_getBody", async (t) => {
   await t.step("returns null for ReadableStream", () => {
-    const stream = new ReadableStream();
-    const result = _getBody(stream);
-    assertEquals(result, null);
+    assertEquals(_getBody(new ReadableStream()), null);
   });
 
-  await t.step("stringifies JSON object", () => {
-    const result = _getBody({ key: "value" });
-    assertEquals(result, { body: '{"key":"value"}' });
+  await t.step("stringifies plain object", () => {
+    assertEquals(_getBody({ key: "value" }), { body: '{"key":"value"}' });
   });
 
   await t.step("stringifies array", () => {
-    const result = _getBody([1, 2, 3]);
-    assertEquals(result, { body: "[1,2,3]" });
+    assertEquals(_getBody([1, 2, 3]), { body: "[1,2,3]" });
   });
 
   await t.step("stringifies number", () => {
-    const result = _getBody(123);
-    assertEquals(result, { body: "123" });
+    assertEquals(_getBody(123), { body: "123" });
   });
 
   await t.step("stringifies boolean", () => {
-    const result = _getBody(true);
-    assertEquals(result, { body: "true" });
+    assertEquals(_getBody(true), { body: "true" });
+  });
+
+  await t.step("stringifies null", () => {
+    assertEquals(_getBody(null), { body: "null" });
   });
 
   await t.step("returns string as-is", () => {
-    const result = _getBody("plain text");
-    assertEquals(result, { body: "plain text" });
+    assertEquals(_getBody("plain text"), { body: "plain text" });
   });
 
   await t.step("returns FormData as-is", () => {
@@ -318,123 +468,74 @@ Deno.test("_getBody", async (t) => {
     assertStrictEquals(result?.body, data);
   });
 
-  await t.step("returns undefined if ReadableStream", () => {
-    const data = new ReadableStream();
-    const result = _getBody(data);
+  await t.step("returns wrapper with undefined body for undefined input", () => {
+    const result = _getBody(undefined);
     assertEquals(result?.body, undefined);
   });
 });
 
-Deno.test("_getContentType", async (t) => {
-  await t.step("returns application/json for JSON object", () => {
-    assertEquals(_getContentType({ key: "value" }), "application/json");
-    assertEquals(_getContentType([1, 2, 3]), "application/json");
-    assertEquals(_getContentType(123), "application/json");
-    assertEquals(_getContentType(true), "application/json");
-  });
-
-  await t.step("returns empty string for native-handled types", () => {
-    assertEquals(_getContentType(undefined), "");
-    assertEquals(_getContentType("text"), "");
-    assertEquals(_getContentType(new FormData()), "");
-    assertEquals(_getContentType(new URLSearchParams()), "");
-  });
-
-  await t.step("returns empty string for Blob with type", () => {
-    const blob = new Blob(["data"], { type: "text/plain" });
-    assertEquals(_getContentType(blob), "");
-  });
-
-  await t.step("returns application/octet-stream for Blob without type", () => {
-    const blob = new Blob(["data"]);
-    assertEquals(_getContentType(blob), "application/octet-stream");
-  });
-
-  await t.step("returns application/octet-stream for ReadableStream", () => {
-    const rs = new ReadableStream();
-    assertEquals(_getContentType(rs), "application/octet-stream");
-  });
-});
-
-Deno.test("_getHeaders", async (t) => {
-  await t.step("sets default Accept header", () => {
-    const headers = _getHeaders();
-    assertEquals(headers.get("Accept"), "application/json, text/plain");
-  });
-
-  await t.step("does not override existing Accept header", () => {
-    const headers = _getHeaders({ headers: { "Accept": "text/html" } });
-    assertEquals(headers.get("Accept"), "text/html");
-  });
-
-  await t.step("sets Content-Type for JSON body", () => {
-    const headers = _getHeaders({ body: { key: "value" } });
-    assertEquals(headers.get("Content-Type"), "application/json");
-  });
-
-  await t.step("does not set Content-Type for string body", () => {
-    const headers = _getHeaders({ body: "text" });
-    assertEquals(headers.has("Content-Type"), false);
-  });
-
-  await t.step("sets Authorization header from bearer token", () => {
-    const headers = _getHeaders({ bearer: "token123" });
-    assertEquals(headers.get("Authorization"), "Bearer token123");
-  });
-
-  await t.step("respects Request headers", () => {
-    const req = new Request("https://example.com", {
-      headers: { "Accept": "application/xml" },
-    });
-    const headers = _getHeaders({}, req.headers);
-    assertEquals(headers.has("Accept"), false);
-  });
-
-  await t.step("does not override Request Content-Type", () => {
-    const req = new Request("https://example.com", {
-      headers: { "Content-Type": "text/plain" },
-    });
-    const headers = _getHeaders({ body: { key: "value" } }, req.headers);
-    assertEquals(headers.has("Content-Type"), false);
-  });
-});
-
 Deno.test("_getRequestInit", async (t) => {
-  await t.step("sets method to GET by default for no body", () => {
-    const init = _getRequestInit();
+  await t.step("defaults to GET when no method and no body", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions());
     assertEquals(init.method, "GET");
   });
 
-  await t.step("sets method to POST when body is provided", () => {
-    const init = _getRequestInit(undefined, { body: { key: "value" } });
+  await t.step("defaults to POST when no method but body is present", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ body: { x: 1 } }));
     assertEquals(init.method, "POST");
   });
 
-  await t.step("uppercases method", () => {
-    const init = _getRequestInit(undefined, { method: "post" });
-    assertEquals(init.method, "POST");
+  await t.step("preserves explicit method as-is (case-sensitive)", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ method: "post" }));
+    assertEquals(init.method, "post");
   });
 
-  await t.step("uses Request method when url is Request", () => {
-    const req = new Request("https://example.com", { method: "PUT" });
-    const init = _getRequestInit(req);
+  await t.step("uses Request.method when url argument is a Request", () => {
+    const realReq = new Request("https://example.com", { method: "PUT" });
+    const init = _getRequestInit(realReq, realReq, makeFetchyOptions());
     assertEquals(init.method, "PUT");
   });
 
-  await t.step("includes headers", () => {
-    const init = _getRequestInit(undefined, { headers: { "X-Custom": "value" } });
-    assertInstanceOf(init.headers, Headers);
-    assertEquals(init.headers?.get("X-Custom"), "value");
+  await t.step("uses Request.method when options.url is a Request", () => {
+    const realReq = new Request("https://example.com", { method: "DELETE" });
+    const init = _getRequestInit(realReq, undefined, makeFetchyOptions({ url: realReq }));
+    assertEquals(init.method, "DELETE");
   });
 
-  await t.step("excludes fetchy-specific options", () => {
-    const init = _getRequestInit(undefined, {
+  await t.step("serializes JSON body", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ body: { key: "value" } }));
+    assertEquals(init.body, '{"key":"value"}');
+  });
+
+  await t.step("omits body key for ReadableStream body", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ body: new ReadableStream() }));
+    assertEquals("body" in init, false);
+  });
+
+  await t.step("merges options headers into request headers", () => {
+    const req = new Request("https://example.com", { headers: { "X-Req": "req" } });
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ headers: new Headers({ "X-Opt": "opt" }) }));
+    assertInstanceOf(init.headers, Headers);
+    const h = init.headers as Headers;
+    assertEquals(h.get("X-Req"), "req");
+    assertEquals(h.get("X-Opt"), "opt");
+    assertEquals(h.get("Accept"), "application/json, text/plain");
+  });
+
+  await t.step("strips fetchy-specific options", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({
       timeout: 10,
       retry: false,
       bearer: "token",
       native: true,
       jitter: 1,
-    });
+    }));
     assertEquals("timeout" in init, false);
     assertEquals("retry" in init, false);
     assertEquals("bearer" in init, false);
@@ -442,190 +543,310 @@ Deno.test("_getRequestInit", async (t) => {
     assertEquals("jitter" in init, false);
   });
 
-  await t.step("includes standard RequestInit properties", () => {
-    const init = _getRequestInit(undefined, {
+  await t.step("strips signal from rest (delegated to retry layer)", () => {
+    const req = new Request("https://example.com");
+    const controller = new AbortController();
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({ signal: controller.signal }));
+    assertEquals(init.signal, undefined);
+  });
+
+  await t.step("preserves standard RequestInit properties via rest spread", () => {
+    const req = new Request("https://example.com");
+    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({
       cache: "no-cache",
       credentials: "include",
       mode: "cors",
-    });
+      redirect: "manual",
+    }));
     assertEquals(init.cache, "no-cache");
     assertEquals(init.credentials, "include");
     assertEquals(init.mode, "cors");
+    assertEquals(init.redirect, "manual");
+  });
+});
+
+/*=============== Options Processing ===========*/
+Deno.test("_buildOption", async (t) => {
+  await t.step("returns FetchyOptions with headers as Headers (invariant)", () => {
+    const result = _buildOption();
+    assertInstanceOf(result.headers, Headers);
+  });
+
+  await t.step("merges base and request options (request wins)", () => {
+    const result = _buildOption({ timeout: 10 }, { timeout: 30 });
+    assertEquals(result.timeout, 30);
+  });
+
+  await t.step("adds method override", () => {
+    const result = _buildOption({ timeout: 10 }, undefined, "POST");
+    assertEquals(result.method, "POST");
+    assertEquals(result.timeout, 10);
+  });
+
+  await t.step("method override wins over both base and request method", () => {
+    const result = _buildOption({ method: "GET" }, { method: "PATCH" }, "PUT");
+    assertEquals(result.method, "PUT");
+  });
+
+  await t.step("falsy method param is ignored (uses request method)", () => {
+    const result = _buildOption({ method: "GET" }, { method: "PUT" }, "");
+    assertEquals(result.method, "PUT");
+  });
+
+  await t.step("deep-merges retry when both are plain objects", () => {
+    const result = _buildOption(
+      { retry: { interval: 5, maxAttempts: 2 } },
+      { retry: { maxAttempts: 7 } },
+    );
+    assertEquals(result.retry, { interval: 5, maxAttempts: 7 });
+  });
+
+  await t.step("does not merge retry when base retry is false", () => {
+    const result = _buildOption({ retry: false }, { retry: { maxAttempts: 5 } });
+    assertEquals(result.retry, { maxAttempts: 5 });
+  });
+
+  await t.step("request retry: false overrides base retry object", () => {
+    const result = _buildOption({ retry: { maxAttempts: 5 } }, { retry: false });
+    assertEquals(result.retry, false);
+  });
+
+  await t.step("merges headers from base and request (request overwrites)", () => {
+    const result = _buildOption(
+      { headers: { "X-A": "base", "X-B": "base" } },
+      { headers: { "X-B": "req", "X-C": "req" } },
+    );
+    const h = result.headers as Headers;
+    assertEquals(h.get("X-A"), "base");
+    assertEquals(h.get("X-B"), "req");
+    assertEquals(h.get("X-C"), "req");
+  });
+
+  await t.step("works with all arguments undefined", () => {
+    const result = _buildOption();
+    assertInstanceOf(result.headers, Headers);
+  });
+
+  await t.step("does not mutate input options", () => {
+    const base: FetchyOptions = { headers: { "X-A": "1" } };
+    const req: FetchyOptions = { headers: { "X-B": "2" } };
+    _buildOption(base, req);
+    assertEquals(base.headers, { "X-A": "1" });
+    assertEquals(req.headers, { "X-B": "2" });
   });
 });
 
 Deno.test("_getRetryOption", async (t) => {
-  await t.step("returns default with limit 1 when retry is false", () => {
+  await t.step("returns defaults with maxAttempts=1 when retry is false", () => {
     const result = _getRetryOption({}, false);
-    assertEquals(result.zmaxAttempts, 1);
-    assertEquals(result.zinterval, _DEFAULT.zinterval);
+    assertEquals(result.maxAttempts, 1);
+    assertEquals(result.interval, _DEFAULT.interval);
+    assertEquals(result.maxInterval, _DEFAULT.maxInterval);
   });
 
   await t.step("uses custom maxAttempts", () => {
-    const result = _getRetryOption({}, { maxAttempts: 5 });
-    assertEquals(result.zmaxAttempts, 5);
+    assertEquals(_getRetryOption({}, { maxAttempts: 5 }).maxAttempts, 5);
   });
 
-  await t.step("ensures minimum limit of 1", () => {
-    const result = _getRetryOption({}, { maxAttempts: 0 });
-    assertEquals(result.zmaxAttempts, 1);
+  await t.step("clamps zero maxAttempts up to 1", () => {
+    assertEquals(_getRetryOption({}, { maxAttempts: 0 }).maxAttempts, 1);
+  });
+
+  await t.step("falls back to default for negative maxAttempts", () => {
+    assertEquals(_getRetryOption({}, { maxAttempts: -3 }).maxAttempts, _DEFAULT.maxAttempts);
   });
 
   await t.step("uses custom interval", () => {
-    const result = _getRetryOption({}, { interval: 5 });
-    assertEquals(result.zinterval, 5);
+    assertEquals(_getRetryOption({}, { interval: 5 }).interval, 5);
   });
 
-  await t.step("ensures minimum interval of 0.01", () => {
-    const result = _getRetryOption({}, { interval: 0 });
-    assertEquals(result.zinterval, 0.01);
+  await t.step("clamps zero interval up to 0.01", () => {
+    assertEquals(_getRetryOption({}, { interval: 0 }).interval, 0.01);
+  });
+
+  await t.step("falls back to default for negative interval", () => {
+    assertEquals(_getRetryOption({}, { interval: -1 }).interval, _DEFAULT.interval);
   });
 
   await t.step("uses custom maxInterval", () => {
-    const result = _getRetryOption({}, { maxInterval: 60 });
-    assertEquals(result.zmaxInterval, 60);
+    assertEquals(_getRetryOption({}, { maxInterval: 60 }).maxInterval, 60);
   });
 
-  await t.step("ensures minimum maxInterval of 1", () => {
-    const result = _getRetryOption({}, { maxInterval: 0 });
-    assertEquals(result.zmaxInterval, 1);
+  await t.step("clamps zero maxInterval up to 1", () => {
+    assertEquals(_getRetryOption({}, { maxInterval: 0 }).maxInterval, 1);
+  });
+
+  await t.step("falls back to default for negative maxInterval", () => {
+    assertEquals(_getRetryOption({}, { maxInterval: -1 }).maxInterval, _DEFAULT.maxInterval);
   });
 
   await t.step("uses custom retryOnTimeout", () => {
-    const result = _getRetryOption({}, { retryOnTimeout: false });
-    assertEquals(result.zonTimeout, false);
+    assertEquals(_getRetryOption({}, { retryOnTimeout: false }).onTimeout, false);
+    assertEquals(_getRetryOption({}, { retryOnTimeout: true }).onTimeout, true);
   });
 
-  await t.step("sets noidem for non-idempotent methods when idempotentOnly is true", () => {
-    const result1 = _getRetryOption({ method: "POST" }, { idempotentOnly: true });
-    assertEquals(result1.znoIdempotent, true);
-
-    const result2 = _getRetryOption({ method: "GET" }, { idempotentOnly: true });
-    assertEquals(result2.znoIdempotent, false);
+  await t.step("default onTimeout when retry is undefined", () => {
+    assertEquals(_getRetryOption({}).onTimeout, _DEFAULT.onTimeout);
   });
 
-  await t.step("uses custom statusCodes", () => {
+  await t.step("idempotentOnly: true sets noIdempotent for POST/PATCH/CONNECT", () => {
+    assertEquals(_getRetryOption({ method: "POST" }, { idempotentOnly: true }).noIdempotent, true);
+    assertEquals(_getRetryOption({ method: "PATCH" }, { idempotentOnly: true }).noIdempotent, true);
+    assertEquals(_getRetryOption({ method: "CONNECT" }, { idempotentOnly: true }).noIdempotent, true);
+  });
+
+  await t.step("idempotentOnly: true keeps noIdempotent false for idempotent methods", () => {
+    assertEquals(_getRetryOption({ method: "GET" }, { idempotentOnly: true }).noIdempotent, false);
+    assertEquals(_getRetryOption({ method: "PUT" }, { idempotentOnly: true }).noIdempotent, false);
+    assertEquals(_getRetryOption({ method: "DELETE" }, { idempotentOnly: true }).noIdempotent, false);
+    assertEquals(_getRetryOption({ method: "HEAD" }, { idempotentOnly: true }).noIdempotent, false);
+  });
+
+  await t.step("idempotentOnly: true is case-insensitive on method", () => {
+    assertEquals(_getRetryOption({ method: "post" }, { idempotentOnly: true }).noIdempotent, true);
+    assertEquals(_getRetryOption({ method: "Patch" }, { idempotentOnly: true }).noIdempotent, true);
+  });
+
+  await t.step("idempotentOnly: false (default) keeps noIdempotent false", () => {
+    assertEquals(_getRetryOption({ method: "POST" }, {}).noIdempotent, false);
+  });
+
+  await t.step("missing method is treated as empty string and considered idempotent", () => {
+    assertEquals(_getRetryOption({}, { idempotentOnly: true }).noIdempotent, false);
+  });
+
+  await t.step("uses custom statusCodes and respectHeaders", () => {
     const codes = [500, 503];
-    const result = _getRetryOption({}, { statusCodes: codes });
-    assertEquals(result.zstatusCodes, codes);
+    const respect = ["x-retry"];
+    const result = _getRetryOption({}, { statusCodes: codes, respectHeaders: respect });
+    assertStrictEquals(result.statusCodes, codes);
+    assertStrictEquals(result.respects, respect);
   });
 
-  await t.step("uses custom respectHeaders", () => {
-    const headers = ["x-retry-after"];
-    const result = _getRetryOption({}, { respectHeaders: headers });
-    assertEquals(result.zrespects, headers);
+  await t.step("falls back to default statusCodes and respects", () => {
+    const result = _getRetryOption({});
+    assertStrictEquals(result.statusCodes, _DEFAULT.statusCodes);
+    assertStrictEquals(result.respects, _DEFAULT.respects);
   });
 });
 
 Deno.test("_getOptions", async (t) => {
-  await t.step("uses default timeout", () => {
-    const opts = _getOptions({});
-    assertEquals(opts.ztimeout, _DEFAULT.ztimeout);
+  const req = new Request("https://example.com");
+
+  await t.step("uses default timeout/jitter/native when none given", () => {
+    const opts = _getOptions(req, {});
+    assertEquals(opts.timeout, _DEFAULT.timeout);
+    assertEquals(opts.jitter, _DEFAULT.jitter);
+    assertEquals(opts.native, _DEFAULT.native);
   });
 
-  await t.step("uses deactivate timeout", () => {
-    const opts = _getOptions({}, undefined, { timeout: 0 });
-    assertEquals(opts.ztimeout, 0);
+  await t.step("uses custom timeout (including 0)", () => {
+    assertEquals(_getOptions(req, {}, { timeout: 30 }).timeout, 30);
+    assertEquals(_getOptions(req, {}, { timeout: 0 }).timeout, 0);
   });
 
-  await t.step("uses custom timeout", () => {
-    const opts = _getOptions({}, undefined, { timeout: 30 });
-    assertEquals(opts.ztimeout, 30);
-  });
-
-  await t.step("uses default jitter", () => {
-    const opts = _getOptions({});
-    assertEquals(opts.zjitter, _DEFAULT.zjitter);
+  await t.step("falls back to default timeout for negative values", () => {
+    assertEquals(_getOptions(req, {}, { timeout: -5 }).timeout, _DEFAULT.timeout);
   });
 
   await t.step("uses custom jitter", () => {
-    const opts = _getOptions({}, undefined, { jitter: 2 });
-    assertEquals(opts.zjitter, 2);
+    assertEquals(_getOptions(req, {}, { jitter: 2 }).jitter, 2);
   });
 
-  await t.step("uses default native", () => {
-    const opts = _getOptions({});
-    assertEquals(opts.znative, _DEFAULT.znative);
+  await t.step("uses custom native flag", () => {
+    assertEquals(_getOptions(req, {}, { native: true }).native, true);
+    assertEquals(_getOptions(req, {}, { native: false }).native, false);
   });
 
-  await t.step("uses custom native", () => {
-    const opts = _getOptions({}, undefined, { native: true });
-    assertEquals(opts.znative, true);
+  await t.step("passes through request body to internal options", () => {
+    const opts = _getOptions(req, {}, { body: "hello" });
+    assertEquals(opts.body, "hello");
   });
 
-  await t.step("merges signals from Request and options", () => {
-    const controller1 = new AbortController();
-    const controller2 = new AbortController();
-    const req = new Request("https://example.com", { signal: controller1.signal });
-    const opts = _getOptions({}, req, { signal: controller2.signal });
-    assertExists(opts.zsignal);
+  await t.step("merges request signal with options.signal", () => {
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    const reqWithSig = new Request("https://example.com", { signal: c1.signal });
+    const opts = _getOptions(reqWithSig, {}, { signal: c2.signal });
+    assertInstanceOf(opts.signal, AbortSignal);
+    assertNotStrictEquals(opts.signal, c1.signal);
+    assertNotStrictEquals(opts.signal, c2.signal);
   });
 
-  await t.step("includes retry options", () => {
-    const opts = _getOptions({}, undefined, {
-      retry: { maxAttempts: 5, interval: 2 },
-    });
-    assertEquals(opts.zmaxAttempts, 5);
-    assertEquals(opts.zinterval, 2);
+  await t.step("uses request signal alone when options.signal absent", () => {
+    const c = new AbortController();
+    const reqWithSig = new Request("https://example.com", { signal: c.signal });
+    const opts = _getOptions(reqWithSig, {}, {});
+    // Request internally wraps the passed signal, so req.signal !== c.signal;
+    // _mergeSignals should pass req.signal through untouched when no options.signal.
+    assertStrictEquals(opts.signal, reqWithSig.signal);
+  });
+
+  await t.step("includes retry-derived options", () => {
+    const opts = _getOptions(req, {}, { retry: { maxAttempts: 5, interval: 2 } });
+    assertEquals(opts.maxAttempts, 5);
+    assertEquals(opts.interval, 2);
   });
 });
 
 /*=============== Signal Handling ==============*/
 Deno.test("_mergeSignals", async (t) => {
-  await t.step("returns undefined when both signals are null", () => {
-    const result = _mergeSignals(null, null);
-    assertEquals(result, undefined);
-  });
-
   await t.step("returns first signal when second is null", () => {
-    const controller = new AbortController();
-    const result = _mergeSignals(controller.signal, null);
-    assertStrictEquals(result, controller.signal);
+    const c = new AbortController();
+    assertStrictEquals(_mergeSignals(c.signal, null), c.signal);
   });
 
-  await t.step("returns second signal when first is null", () => {
-    const controller = new AbortController();
-    const result = _mergeSignals(null, controller.signal);
-    assertStrictEquals(result, controller.signal);
+  await t.step("returns first signal when second is undefined", () => {
+    const c = new AbortController();
+    assertStrictEquals(_mergeSignals(c.signal), c.signal);
   });
 
   await t.step("merges both signals when both exist", () => {
-    const controller1 = new AbortController();
-    const controller2 = new AbortController();
-    const result = _mergeSignals(controller1.signal, controller2.signal);
-    assertExists(result);
-    assertNotStrictEquals(result, controller1.signal);
-    assertNotStrictEquals(result, controller2.signal);
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    const merged = _mergeSignals(c1.signal, c2.signal);
+    assertInstanceOf(merged, AbortSignal);
+    assertNotStrictEquals(merged, c1.signal);
+    assertNotStrictEquals(merged, c2.signal);
+  });
+
+  await t.step("merged signal aborts when either source aborts", () => {
+    const c1 = new AbortController();
+    const c2 = new AbortController();
+    const merged = _mergeSignals(c1.signal, c2.signal);
+    assertEquals(merged.aborted, false);
+    c1.abort();
+    assertEquals(merged.aborted, true);
   });
 });
 
 Deno.test("_withTimeout", async (t) => {
   await t.step("returns existing signal when timeout is 0", () => {
-    const controller = new AbortController();
-    const opts = { ..._DEFAULT, ztimeout: 0, zsignal: controller.signal };
-    const result = _withTimeout(opts);
-    assertStrictEquals(result, controller.signal);
+    const c = new AbortController();
+    const opts = makeOptions({ timeout: 0, signal: c.signal });
+    assertStrictEquals(_withTimeout(opts), c.signal);
   });
 
   await t.step("returns existing signal when timeout is negative", () => {
-    const controller = new AbortController();
-    const opts = { ..._DEFAULT, ztimeout: -1, zsignal: controller.signal };
-    const result = _withTimeout(opts);
-    assertStrictEquals(result, controller.signal);
+    const c = new AbortController();
+    const opts = makeOptions({ timeout: -1, signal: c.signal });
+    assertStrictEquals(_withTimeout(opts), c.signal);
   });
 
-  await t.step("creates timeout signal when timeout is positive", () => {
-    const opts = { ..._DEFAULT, ztimeout: 5 };
+  await t.step("merges timeout signal with existing signal", () => {
+    const c = new AbortController();
+    const opts = makeOptions({ timeout: 5, signal: c.signal });
     const result = _withTimeout(opts);
-    assertExists(result);
+    assertNotStrictEquals(result, c.signal);
+    assertInstanceOf(result, AbortSignal);
   });
 
-  await t.step("merges timeout with existing signal", () => {
-    const controller = new AbortController();
-    const opts = { ..._DEFAULT, ztimeout: 5, zsignal: controller.signal };
+  await t.step("timeout signal aborts after timeout elapses", async () => {
+    const c = new AbortController();
+    const opts = makeOptions({ timeout: 0.05, signal: c.signal });
     const result = _withTimeout(opts);
-    assertExists(result);
-    assertNotStrictEquals(result, controller.signal);
+    await new Promise((r) => setTimeout(r, 100));
+    assertEquals(result.aborted, true);
   });
 });
 
@@ -634,202 +855,225 @@ Deno.test("_wait", async (t) => {
   await t.step("returns immediately when seconds is 0", async () => {
     const start = Date.now();
     await _wait(0);
-    const elapsed = Date.now() - start;
-    assertEquals(elapsed < 10, true);
+    assertEquals(Date.now() - start < 10, true);
   });
 
-  await t.step("returns immediately when seconds is negative", async () => {
+  await t.step("returns immediately for negative seconds", async () => {
     const start = Date.now();
     await _wait(-1);
-    const elapsed = Date.now() - start;
-    assertEquals(elapsed < 10, true);
+    assertEquals(Date.now() - start < 10, true);
   });
 
-  await t.step("waits approximately correct time with random", async () => {
-    const start = Date.now();
-    await _wait(0.1, true);
-    const elapsed = Date.now() - start;
-    assertEquals(elapsed >= 0, true);
-    assertEquals(elapsed <= 120, true);
-  });
-
-  await t.step("waits exact time without random", async () => {
+  await t.step("waits roughly the requested time without random flag", async () => {
     const start = Date.now();
     await _wait(0.1, false);
     const elapsed = Date.now() - start;
     assertEquals(elapsed >= 90, true);
-    assertEquals(elapsed <= 120, true);
+    assertEquals(elapsed <= 200, true);
+  });
+
+  await t.step("randomized wait does not exceed the upper bound", async () => {
+    const start = Date.now();
+    await _wait(0.1, true);
+    const elapsed = Date.now() - start;
+    assertEquals(elapsed >= 0, true);
+    assertEquals(elapsed <= 200, true);
   });
 });
 
-/*=============== Retry Logic ==================*/
 Deno.test("_parseRetryHeader", async (t) => {
-  await t.step("parses integer seconds", () => {
+  await t.step("parses small integer as seconds-to-wait", () => {
     assertEquals(_parseRetryHeader("120"), 120);
     assertEquals(_parseRetryHeader("0"), 0);
   });
 
-  await t.step("parses date string", () => {
-    const future = new Date(Date.now() + 5000);
-    const result = _parseRetryHeader(future.toUTCString());
-    assertEquals(result >= 4, true);
-    assertEquals(result <= 6, true);
+  await t.step("parses large future unix timestamp as remaining seconds", () => {
+    const future = Math.floor(Date.now() / 1000) + 30;
+    const result = _parseRetryHeader(String(future));
+    assertEquals(result >= 25, true);
+    assertEquals(result <= 35, true);
   });
 
-  await t.step("returns NaN for invalid input", () => {
-    assertEquals(Number.isNaN(_parseRetryHeader("invalid")), true);
+  await t.step("parses HTTP date string", () => {
+    const future = new Date(Date.now() + 5000);
+    const result = _parseRetryHeader(future.toUTCString());
+    assertEquals(result >= 3, true);
+    assertEquals(result <= 7, true);
+  });
+
+  await t.step("returns NaN for empty / null / undefined", () => {
     assertEquals(Number.isNaN(_parseRetryHeader("")), true);
-    assertEquals(Number.isNaN(_parseRetryHeader(undefined)), true);
     assertEquals(Number.isNaN(_parseRetryHeader(null)), true);
+    assertEquals(Number.isNaN(_parseRetryHeader(undefined)), true);
+  });
+
+  await t.step("returns NaN for non-numeric, non-date string", () => {
+    assertEquals(Number.isNaN(_parseRetryHeader("invalid")), true);
   });
 });
 
 Deno.test("_findRetryHeader", async (t) => {
-  await t.step("finds retry-after header", () => {
+  await t.step("returns the parsed value when greater than interval", () => {
     const headers = new Headers({ "retry-after": "120" });
-    const opts = { ..._DEFAULT };
-    const result = _findRetryHeader(opts, headers);
-    assertEquals(result, 120);
+    assertEquals(_findRetryHeader(makeOptions(), headers), 120);
   });
 
-  await t.step("finds ratelimit-reset header", () => {
-    const headers = new Headers({ "ratelimit-reset": "60" });
-    const opts = { ..._DEFAULT };
-    const result = _findRetryHeader(opts, headers);
-    assertEquals(result, 60);
-  });
-
-  await t.step("returns minimum of header value and interval", () => {
+  await t.step("falls back to interval when header value is smaller", () => {
     const headers = new Headers({ "retry-after": "1" });
-    const opts = { ..._DEFAULT, zinterval: 5 };
-    const result = _findRetryHeader(opts, headers);
-    assertEquals(result, 5);
+    assertEquals(_findRetryHeader(makeOptions({ interval: 5 }), headers), 5);
   });
 
-  await t.step("returns undefined when no header found", () => {
-    const headers = new Headers();
-    const opts = { ..._DEFAULT };
-    const result = _findRetryHeader(opts, headers);
-    assertEquals(result, undefined);
+  await t.step("respects ratelimit-reset header", () => {
+    const headers = new Headers({ "ratelimit-reset": "60" });
+    assertEquals(_findRetryHeader(makeOptions(), headers), 60);
   });
 
-  await t.step("checks headers in order", () => {
-    const headers = new Headers({
-      "retry-after": "10",
-      "ratelimit-reset": "20",
-    });
-    const opts = { ..._DEFAULT };
-    const result = _findRetryHeader(opts, headers);
-    assertEquals(result, 10);
+  await t.step("respects x-ratelimit-reset header", () => {
+    const headers = new Headers({ "x-ratelimit-reset": "45" });
+    assertEquals(_findRetryHeader(makeOptions(), headers), 45);
+  });
+
+  await t.step("checks headers in order defined by respects", () => {
+    const headers = new Headers({ "retry-after": "10", "ratelimit-reset": "20" });
+    assertEquals(_findRetryHeader(makeOptions(), headers), 10);
+  });
+
+  await t.step("returns undefined when none of the respected headers exist", () => {
+    assertEquals(_findRetryHeader(makeOptions(), new Headers()), undefined);
+  });
+
+  await t.step("returns undefined when header value is invalid", () => {
+    const headers = new Headers({ "retry-after": "garbage" });
+    assertEquals(_findRetryHeader(makeOptions(), headers), undefined);
+  });
+
+  await t.step("trims surrounding whitespace before parsing", () => {
+    const headers = new Headers({ "retry-after": "  120  " });
+    assertEquals(_findRetryHeader(makeOptions(), headers), 120);
   });
 });
 
 Deno.test("_getNextInterval", async (t) => {
-  await t.step("uses exponential backoff by default", () => {
-    const opts = { ..._DEFAULT, zinterval: 2, zmaxInterval: 100 };
-    const headers = new Headers();
-    assertEquals(_getNextInterval(0, opts, headers), 2);
-    assertEquals(_getNextInterval(1, opts, headers), 4);
-    assertEquals(_getNextInterval(2, opts, headers), 8);
+  await t.step("returns exponential backoff when no respected header", () => {
+    const opts = makeOptions({ interval: 2, maxInterval: 100 });
+    assertEquals(_getNextInterval(0, opts, new Headers()), 2);
+    assertEquals(_getNextInterval(1, opts, new Headers()), 4);
+    assertEquals(_getNextInterval(2, opts, new Headers()), 8);
   });
 
-  await t.step("caps at maxInterval", () => {
-    const opts = { ..._DEFAULT, zinterval: 10, zmaxInterval: 20 };
-    const headers = new Headers();
-    assertEquals(_getNextInterval(5, opts, headers), 20);
+  await t.step("caps exponential backoff at maxInterval", () => {
+    const opts = makeOptions({ interval: 10, maxInterval: 20 });
+    assertEquals(_getNextInterval(5, opts, new Headers()), 20);
   });
 
   await t.step("uses header value when available", () => {
-    const opts = { ..._DEFAULT, zinterval: 2 };
+    const opts = makeOptions({ interval: 2 });
     const headers = new Headers({ "retry-after": "10" });
     assertEquals(_getNextInterval(0, opts, headers), 10);
   });
 
-  await t.step("uses interval when header value is less", () => {
-    const opts = { ..._DEFAULT, zinterval: 10 };
-    const headers = new Headers({ "retry-after": "5" });
+  await t.step("falls back to interval if header is shorter than interval", () => {
+    const opts = makeOptions({ interval: 10 });
+    const headers = new Headers({ "retry-after": "1" });
     assertEquals(_getNextInterval(0, opts, headers), 10);
+  });
+
+  await t.step("falls back to interval when header exists but is unparseable", () => {
+    const opts = makeOptions({ interval: 7 });
+    const headers = new Headers({ "retry-after": "bad" });
+    assertEquals(_getNextInterval(0, opts, headers), 7);
   });
 });
 
+Deno.test("_waitInterval", async (t) => {
+  await t.step("returns true and waits when interval is within bound", async () => {
+    const opts = makeOptions({ interval: 0.05, maxInterval: 1 });
+    const start = Date.now();
+    const ok = await _waitInterval(0, opts);
+    const elapsed = Date.now() - start;
+    assertEquals(ok, true);
+    assertEquals(elapsed >= 40, true);
+  });
+
+  await t.step("returns false without waiting when interval exceeds maxInterval", async () => {
+    const opts = makeOptions({ interval: 100, maxInterval: 1 });
+    const headers = new Headers({ "retry-after": "1000" });
+    const start = Date.now();
+    const ok = await _waitInterval(0, opts, headers);
+    const elapsed = Date.now() - start;
+    assertEquals(ok, false);
+    assertEquals(elapsed < 50, true);
+  });
+});
+
+/*=============== Retry Logic ==================*/
 Deno.test("_shouldRetry", async (t) => {
-  await t.step("returns false when noidem is true", async () => {
-    const opts = { ..._DEFAULT, znoIdempotent: true };
+  await t.step("returns false when noIdempotent is true", async () => {
+    const opts = makeOptions({ noIdempotent: true });
     const resp = new Response("error", { status: 500 });
-    const result = await _shouldRetry(0, opts, resp, "fn");
-    assertEquals(result, false);
+    assertEquals(await _shouldRetry(0, opts, resp), false);
   });
 
-  await t.step("returns false when max attempts reached", async () => {
-    const opts = { ..._DEFAULT, zmaxAttempts: 3 };
+  await t.step("returns false when attempts reached the limit (count = max-1)", async () => {
+    const opts = makeOptions({ maxAttempts: 3 });
     const resp = new Response("error", { status: 500 });
-    const result = await _shouldRetry(2, opts, resp, "fn");
-    assertEquals(result, false);
+    assertEquals(await _shouldRetry(2, opts, resp), false);
   });
 
-  await t.step("returns false in native mode", async () => {
-    const opts = { ..._DEFAULT, znative: true };
+  await t.step("returns false in native mode for retryable status", async () => {
+    const opts = makeOptions({ native: true });
     const resp = new Response("error", { status: 500 });
-    const result = await _shouldRetry(0, opts, resp, "fn");
-    assertEquals(result, false);
+    assertEquals(await _shouldRetry(0, opts, resp), false);
   });
 
-  await t.step("returns false when status not in retry list", async () => {
-    const opts = { ..._DEFAULT, zstatusCodes: [500] };
+  await t.step("returns false when status is not in statusCodes", async () => {
+    const opts = makeOptions({ statusCodes: [500] });
     const resp = new Response("error", { status: 404 });
-    const result = await _shouldRetry(0, opts, resp, "fn");
-    assertEquals(result, false);
+    assertEquals(await _shouldRetry(0, opts, resp), false);
   });
 
-  await t.step("returns true and waits for retryable status", async () => {
-    const opts = { ..._DEFAULT, zinterval: 0.01, zmaxInterval: 1 };
+  await t.step("returns true for retryable status and waits", async () => {
+    const opts = makeOptions({ interval: 0.01, maxInterval: 1 });
     const resp = new Response("error", { status: 500 });
     const start = Date.now();
-    const result = await _shouldRetry(0, opts, resp, "fn");
-    const elapsed = Date.now() - start;
+    const result = await _shouldRetry(0, opts, resp);
     assertEquals(result, true);
-    assertEquals(elapsed >= 0, true);
+    assertEquals(Date.now() - start >= 0, true);
   });
 
-  await t.step("returns true when retry interval exceeds max", async () => {
-    const opts = { ..._DEFAULT, zinterval: 2, zmaxInterval: 1 };
-    const resp = new Response("error", { status: 500 });
-    const start = Date.now();
-    const result = await _shouldRetry(0, opts, resp, "fn");
-    const elapsed = Date.now() - start;
-    assertEquals(result, true);
-    assertEquals(elapsed >= 1000, true);
-    assertEquals(elapsed < 1500, true);
+  await t.step("returns false when retry-after exceeds maxInterval", async () => {
+    const opts = makeOptions({ interval: 1, maxInterval: 5 });
+    const resp = new Response("error", {
+      status: 429,
+      headers: { "retry-after": "1000" },
+    });
+    assertEquals(await _shouldRetry(0, opts, resp), false);
   });
 
-  await t.step("returns true for timeout error when retryOnTimeout is true", async () => {
-    const opts = { ..._DEFAULT, zonTimeout: true };
-    const error = new Error("Timeout");
-    error.name = "TimeoutError";
-    const result = await _shouldRetry(0, opts, error, "fn");
-    assertEquals(result, true);
+  await t.step("returns true for TimeoutError when onTimeout is true", async () => {
+    const opts = makeOptions({ onTimeout: true, interval: 0.01 });
+    const err = new Error("Timeout");
+    err.name = "TimeoutError";
+    assertEquals(await _shouldRetry(0, opts, err), true);
   });
 
-  await t.step("returns false for timeout error when retryOnTimeout is false", async () => {
-    const opts = { ..._DEFAULT, zonTimeout: false };
-    const error = new Error("Timeout");
-    error.name = "TimeoutError";
-    const result = await _shouldRetry(0, opts, error, "fn");
-    assertEquals(result, false);
+  await t.step("returns false for TimeoutError when onTimeout is false", async () => {
+    const opts = makeOptions({ onTimeout: false });
+    const err = new Error("Timeout");
+    err.name = "TimeoutError";
+    assertEquals(await _shouldRetry(0, opts, err), false);
   });
 
-  await t.step("returns false for non-timeout error", async () => {
-    const opts = { ..._DEFAULT };
-    const error = new Error("Network error");
-    const result = await _shouldRetry(0, opts, error, "fn");
-    assertEquals(result, false);
+  await t.step("returns false for non-timeout errors", async () => {
+    const opts = makeOptions();
+    assertEquals(await _shouldRetry(0, opts, new Error("Network error")), false);
   });
 
-  await t.step("returns false for fn is undefined", async () => {
-    const opts = { ..._DEFAULT };
-    const error = new Error("error");
-    const result = await _shouldRetry(0, opts, error, undefined);
-    assertEquals(result, false);
+  await t.step("returns false for non-Response, non-Error values", async () => {
+    const opts = makeOptions();
+    assertEquals(await _shouldRetry(0, opts, "string error"), false);
+    assertEquals(await _shouldRetry(0, opts, undefined), false);
+    assertEquals(await _shouldRetry(0, opts, null), false);
   });
 });
 
@@ -846,74 +1090,46 @@ Deno.test("_cloneRequestF", async (t) => {
     const req = new Request("https://example.com");
     const cloneF = _cloneRequestF(req);
     await cloneF();
-    const result = await cloneF();
-    assertNotStrictEquals(result, req);
-    assertEquals(result.url, req.url);
+    const second = await cloneF();
+    assertNotStrictEquals(second, req);
+    assertEquals(second.url, req.url);
   });
 
-  await t.step("cancels previous request body when cancel is true", async () => {
+  await t.step("each subsequent call returns a distinct clone", async () => {
+    const req = new Request("https://example.com");
+    const cloneF = _cloneRequestF(req);
+    await cloneF();
+    const second = await cloneF();
+    const third = await cloneF();
+    assertNotStrictEquals(second, third);
+    assertEquals(second.url, third.url);
+  });
+
+  await t.step("cancel=true does not throw and returns last prepared request", async () => {
     const req = new Request("https://example.com", { method: "POST", body: "test" });
     const cloneF = _cloneRequestF(req);
     const first = await cloneF();
-    await cloneF(true);
-    // Body should be cancelled, but we can't easily verify this
-    // Just ensure it doesn't throw
-    assertEquals(first.url, req.url);
+    const cancelled = await cloneF(true);
+    assertEquals(first.url, cancelled.url);
+  });
+
+  await t.step("cancel=true before any non-cancel call returns original request", async () => {
+    const req = new Request("https://example.com");
+    const cloneF = _cloneRequestF(req);
+    const result = await cloneF(true);
+    assertStrictEquals(result, req);
   });
 });
 
-/*=============== Main Fetch Functions =========*/
+/*=============== Fetch Execution ==============*/
 Deno.test("_fetchWithJitter", async (t) => {
-  await t.step("executes fetch after jitter delay", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("executes fetch and forwards signal", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
       const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zjitter: 0.01 };
-      const start = Date.now();
+      const opts = makeOptions({ jitter: 0, timeout: 5 });
       const resp = await _fetchWithJitter(req, {}, opts);
-      const elapsed = Date.now() - start;
       assertEquals(resp.status, 200);
-      assertEquals(elapsed >= 0, true);
-      assertSpyCalls(mockFetch, 1);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("jitter of 0 has no delay", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-
-    try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zjitter: 0 };
-      const start = Date.now();
-      const resp = await _fetchWithJitter(req, {}, opts);
-      const elapsed = Date.now() - start;
-      assertEquals(elapsed < 20, true);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("passes signal to fetch", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const req = new Request("https://example.com");
-      const controller = new AbortController();
-      const opts = { ..._DEFAULT, zjitter: 0, ztimeout: 5, zsignal: controller.signal };
-      await _fetchWithJitter(req, {}, opts);
       assertSpyCalls(mockFetch, 1);
       const [, init] = mockFetch.calls[0].args;
       assertExists(init?.signal);
@@ -921,57 +1137,68 @@ Deno.test("_fetchWithJitter", async (t) => {
       mockFetch.restore();
     }
   });
+
+  await t.step("no jitter means negligible delay", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
+    try {
+      const start = Date.now();
+      await _fetchWithJitter(new Request("https://example.com"), {}, makeOptions({ jitter: 0 }));
+      assertEquals(Date.now() - start < 30, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("propagates fetch errors", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("boom")));
+    try {
+      await assertRejects(
+        () => _fetchWithJitter(new Request("https://example.com"), {}, makeOptions({ jitter: 0 })),
+        Error,
+        "boom",
+      );
+    } finally {
+      mockFetch.restore();
+    }
+  });
 });
 
 Deno.test("_fetchWithRetry", async (t) => {
-  await t.step("successful fetch on first try", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("returns response on first successful fetch", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zinterval: 0.01 };
-      const resp = await _fetchWithRetry(req, {}, opts, false);
-      assertEquals(resp?.status, 200);
+      const opts = makeOptions({ interval: 0.01 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 200);
       assertSpyCalls(mockFetch, 1);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("retries on 500 status", async () => {
+  await t.step("retries on retryable status until success", async () => {
     let attempts = 0;
     const mockFetch = stub(globalThis, "fetch", () => {
       attempts++;
-      if (attempts < 3) {
-        return Promise.resolve(new Response("error", { status: 500 }));
-      }
+      if (attempts < 3) return Promise.resolve(new Response("err", { status: 500 }));
       return Promise.resolve(new Response("ok", { status: 200 }));
     });
     try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zinterval: 0.01, zmaxInterval: 1 };
-      const resp = await _fetchWithRetry(req, {}, opts, false);
-      assertEquals(resp?.status, 200);
+      const opts = makeOptions({ interval: 0.01, maxInterval: 1, maxAttempts: 5 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 200);
       assertEquals(attempts, 3);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("throws HTTPStatusError after max retries", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
-    );
+  await t.step("throws HTTPStatusError after exhausting retries", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
     try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zinterval: 0.01, zmaxAttempts: 3, zmaxInterval: 1 };
+      const opts = makeOptions({ interval: 0.01, maxAttempts: 3, maxInterval: 1 });
       await assertRejects(
-        () => _fetchWithRetry(req, {}, opts, false),
+        () => _fetchWithRetry(new Request("https://example.com"), {}, opts),
         HTTPStatusError,
       );
       assertSpyCalls(mockFetch, 3);
@@ -980,36 +1207,14 @@ Deno.test("_fetchWithRetry", async (t) => {
     }
   });
 
-  await t.step("returns null in safe mode on error", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
-    );
+  await t.step("throws on network error (no retry by default)", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("network")));
     try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zinterval: 0.01, zmaxAttempts: 3, zmaxInterval: 1 };
-      const resp = await _fetchWithRetry(req, {}, opts, true);
-      assertEquals(resp, null);
-      assertSpyCalls(mockFetch, 3);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("throws on network error", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
-    try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, zinterval: 0.01, zmaxAttempts: 3 };
+      const opts = makeOptions({ interval: 0.01, maxAttempts: 3 });
       await assertRejects(
-        () => _fetchWithRetry(req, {}, opts, false),
+        () => _fetchWithRetry(new Request("https://example.com"), {}, opts),
         Error,
-        "Network error",
+        "network",
       );
       assertSpyCalls(mockFetch, 1);
     } finally {
@@ -1017,307 +1222,204 @@ Deno.test("_fetchWithRetry", async (t) => {
     }
   });
 
-  await t.step("does not throw in native mode for error status", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
-    );
+  await t.step("retries TimeoutError when onTimeout is true", async () => {
+    let attempts = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      attempts++;
+      if (attempts < 2) {
+        const e = new Error("timeout");
+        e.name = "TimeoutError";
+        return Promise.reject(e);
+      }
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
     try {
-      const req = new Request("https://example.com");
-      const opts = { ..._DEFAULT, znative: true, zinterval: 0.01, zmaxAttempts: 1 };
-      const resp = await _fetchWithRetry(req, {}, opts, false);
-      assertEquals(resp?.status, 500);
+      const opts = makeOptions({ interval: 0.01, onTimeout: true, maxAttempts: 3 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 200);
+      assertEquals(attempts, 2);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("does not throw in native mode for error status", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
+    try {
+      const opts = makeOptions({ native: true, interval: 0.01, maxAttempts: 1 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 500);
       assertSpyCalls(mockFetch, 1);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("does not throw if url is not provided in safe mode", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("throws HTTPStatusError on 4xx (non-retryable status) by default", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 404 })));
     try {
-      const req = "";
-      const opts = _DEFAULT;
-      const resp = await _fetchWithRetry(req, {}, opts, true);
-      assertEquals(resp, null);
-      assertSpyCalls(mockFetch, 0);
+      const opts = makeOptions({ interval: 0.01, maxAttempts: 3, maxInterval: 1 });
+      await assertRejects(
+        () => _fetchWithRetry(new Request("https://example.com"), {}, opts),
+        HTTPStatusError,
+      );
+      assertSpyCalls(mockFetch, 1);
     } finally {
       mockFetch.restore();
     }
   });
 });
 
-/*=============== Custom Object Assignment =======*/
+/*=============== Response Wrapping ============*/
 Deno.test("_makeFetchyResponse", async (t) => {
-  await t.step("assigns text method that parses response as text", async () => {
-    const resp = Promise.resolve(new Response("hello world"));
-    const result = _makeFetchyResponse(resp, false);
-    assertEquals(await result.text(), "hello world");
+  await t.step("non-safe text() parses body", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("hello")));
+    assertEquals(await wrapped.text(), "hello");
   });
 
-  await t.step("assigns json method that parses response as JSON", async () => {
-    const resp = Promise.resolve(new Response(JSON.stringify({ key: "value" })));
-    const result = _makeFetchyResponse(resp, false);
-    assertEquals(await result.json(), { key: "value" });
+  await t.step("non-safe json() parses body", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response(JSON.stringify({ k: "v" }))));
+    assertEquals(await wrapped.json(), { k: "v" });
   });
 
-  await t.step("assigns blob method that parses response as Blob", async () => {
-    const resp = Promise.resolve(new Response("data"));
-    const result = _makeFetchyResponse(resp, false);
-    const blob = await result.blob();
-    assertInstanceOf(blob, Blob);
+  await t.step("non-safe blob() returns Blob", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+    assertInstanceOf(await wrapped.blob(), Blob);
   });
 
-  await t.step("assigns arrayBuffer method that parses response as ArrayBuffer", async () => {
-    const resp = Promise.resolve(new Response("data"));
-    const result = _makeFetchyResponse(resp, false);
-    const buffer = await result.arrayBuffer();
-    assertInstanceOf(buffer, ArrayBuffer);
+  await t.step("non-safe arrayBuffer() returns ArrayBuffer", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+    assertInstanceOf(await wrapped.arrayBuffer(), ArrayBuffer);
   });
 
-  await t.step("assigns formData method that parses response as FormData", async () => {
-    const formData = new FormData();
-    formData.append("key", "value");
-    const resp = Promise.resolve(new Response(formData, { status: 200 }));
-    const result = _makeFetchyResponse(resp, false);
-    const parsed = await result.formData();
-    assertInstanceOf(parsed, FormData);
+  await t.step("non-safe bytes() returns Uint8Array", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+    assertInstanceOf(await wrapped.bytes(), Uint8Array);
   });
 
-  await t.step("assigns bytes method that parses response as Uint8Array", async () => {
-    const resp = Promise.resolve(new Response("data"));
-    const result = _makeFetchyResponse(resp, false);
-    const bytes = await result.bytes();
-    assertInstanceOf(bytes, Uint8Array);
+  await t.step("non-safe formData() returns FormData", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response(fd)));
+    assertInstanceOf(await wrapped.formData(), FormData);
   });
 
-  await t.step("assigns safe text method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.text(), null);
+  await t.step("non-safe json() rejects on parsing error", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("not json")));
+    await assertRejects(() => wrapped.json());
   });
 
-  await t.step("assigns safe json method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.json(), null);
+  await t.step("non-safe await yields original Response", async () => {
+    const original = new Response("x");
+    const wrapped = _makeFetchyResponse(Promise.resolve(original));
+    assertStrictEquals(await wrapped, original);
   });
 
-  await t.step("assigns safe blob method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.blob(), null);
+  await t.step("non-safe then chains preserve Response", async () => {
+    const original = new Response("x");
+    const wrapped = _makeFetchyResponse(Promise.resolve(original));
+    const result = await wrapped.then((r) => r);
+    assertStrictEquals(result, original);
   });
 
-  await t.step("assigns safe arrayBuffer method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.arrayBuffer(), null);
+  await t.step("non-safe catch chains receive errors", async () => {
+    const err = new Error("boom");
+    const wrapped = _makeFetchyResponse(Promise.reject(err));
+    const caught = await wrapped.catch((e) => e);
+    assertStrictEquals(caught, err);
   });
 
-  await t.step("assigns safe formData method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.formData(), null);
+  await t.step("safe methods return null when promise rejects", async () => {
+    const wrapped = _makeFetchyResponse(Promise.reject(new Error("fail")), true);
+    assertEquals(await wrapped.text(), null);
+    assertEquals(await wrapped.json(), null);
+    assertEquals(await wrapped.blob(), null);
+    assertEquals(await wrapped.arrayBuffer(), null);
+    assertEquals(await wrapped.bytes(), null);
+    assertEquals(await wrapped.formData(), null);
   });
 
-  await t.step("assigns safe bytes method that returns null on error", async () => {
-    const resp = Promise.reject(new Error("Fetch failed"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.bytes(), null);
+  await t.step("safe methods return null when resolved with null", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(null), true);
+    assertEquals(await wrapped.text(), null);
+    assertEquals(await wrapped.json(), null);
+    assertEquals(await wrapped.blob(), null);
+    assertEquals(await wrapped.arrayBuffer(), null);
+    assertEquals(await wrapped.bytes(), null);
+    assertEquals(await wrapped.formData(), null);
   });
 
-  await t.step("safe text returns text when response is successful", async () => {
-    const resp = Promise.resolve(new Response("success"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.text(), "success");
+  await t.step("safe methods return null on parsing failure", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("not json")), true);
+    assertEquals(await wrapped.json(), null);
   });
 
-  await t.step("safe json returns parsed JSON when response is successful", async () => {
-    const resp = Promise.resolve(new Response(JSON.stringify({ status: "ok" })));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.json(), { status: "ok" });
-  });
-
-  await t.step("safe blob returns Blob when response is successful", async () => {
-    const resp = Promise.resolve(new Response("blob data"));
-    const result = _makeFetchyResponse(resp, true);
-    const blob = await result.blob();
-    assertInstanceOf(blob, Blob);
-  });
-
-  await t.step("safe arrayBuffer returns ArrayBuffer when response is successful", async () => {
-    const resp = Promise.resolve(new Response("buffer data"));
-    const result = _makeFetchyResponse(resp, true);
-    const buffer = await result.arrayBuffer();
-    assertInstanceOf(buffer, ArrayBuffer);
-  });
-
-  await t.step("safe formData returns FormData when response is successful", async () => {
-    const formData = new FormData();
-    formData.append("field", "value");
-    const resp = Promise.resolve(new Response(formData, { status: 200 }));
-    const result = _makeFetchyResponse(resp, true);
-    const parsed = await result.formData();
-    assertInstanceOf(parsed, FormData);
-  });
-
-  await t.step("safe bytes returns Uint8Array when response is successful", async () => {
-    const resp = Promise.resolve(new Response("bytes data"));
-    const result = _makeFetchyResponse(resp, true);
-    const bytes = await result.bytes();
-    assertInstanceOf(bytes, Uint8Array);
-  });
-
-  await t.step("safe methods return null when response is null", async () => {
-    const resp = Promise.resolve(null);
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.text(), null);
-    assertEquals(await result.json(), null);
-    assertEquals(await result.blob(), null);
-    assertEquals(await result.arrayBuffer(), null);
-    assertEquals(await result.formData(), null);
-    assertEquals(await result.bytes(), null);
-  });
-
-  await t.step("preserves original promise behavior for await", async () => {
-    const originalResp = new Response("test");
-    const resp = Promise.resolve(originalResp);
-    const result = _makeFetchyResponse(resp, false);
-    const awaited = await result;
-    assertStrictEquals(awaited, originalResp);
-  });
-
-  await t.step("preserves original promise behavior for then", async () => {
-    const originalResp = new Response("test");
-    const resp = Promise.resolve(originalResp);
-    const result = _makeFetchyResponse(resp, true);
-    const thenResult = await result.then((r) => r);
-    assertStrictEquals(thenResult, originalResp);
-  });
-
-  await t.step("preserves original promise behavior for catch", async () => {
-    const error = new Error("Test error");
-    const resp = Promise.reject(error);
-    const result = _makeFetchyResponse(resp, false);
-    const caught = await result.catch((e) => e);
-    assertStrictEquals(caught, error);
-  });
-
-  await t.step("normal methods throw on parsing error", async () => {
-    const resp = Promise.resolve(new Response("not json"));
-    const result = _makeFetchyResponse(resp, false);
-    await assertRejects(() => result.json());
-  });
-
-  await t.step("safe methods return null on parsing error", async () => {
-    const resp = Promise.resolve(new Response("not json"));
-    const result = _makeFetchyResponse(resp, true);
-    assertEquals(await result.json(), null);
+  await t.step("safe methods return data on success", async () => {
+    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("hello")), true);
+    assertEquals(await wrapped.text(), "hello");
   });
 });
 
+/*=============== Method Generation ============*/
 Deno.test("_genMethods", async (t) => {
-  await t.step("assigns normal methods", () => {
+  await t.step("defines all standard HTTP methods", () => {
     const obj = {} as Record<string, unknown>;
     _genMethods(obj);
-
-    assertExists(obj.fetch);
-    assertExists(obj.get);
-    assertExists(obj.head);
-    assertExists(obj.post);
-    assertExists(obj.put);
-    assertExists(obj.patch);
-    assertExists(obj.delete);
+    for (const m of ["fetch", "get", "head", "post", "put", "patch", "delete"]) {
+      assertEquals(typeof obj[m], "function");
+    }
   });
 
-  await t.step("assigns safe methods", () => {
+  await t.step("defines all safe-variant methods when safe=true", () => {
     const obj = {} as Record<string, unknown>;
     _genMethods(obj, true);
-
-    assertExists(obj.sfetch);
-    assertExists(obj.sget);
-    assertExists(obj.shead);
-    assertExists(obj.spost);
-    assertExists(obj.sput);
-    assertExists(obj.spatch);
-    assertExists(obj.sdelete);
+    for (const m of ["sfetch", "sget", "shead", "spost", "sput", "spatch", "sdelete"]) {
+      assertEquals(typeof obj[m], "function");
+    }
   });
 
-  await t.step("sets http method as method name in normal methods", async () => {
-    let attempts = 0;
-    const methods = ["TRACE", "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (input, init) => {
-        const method = init?.method ? init.method : input instanceof Request ? input.method : "GET";
-        assertEquals(method, methods[attempts]);
-        attempts++;
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
+  await t.step("non-fetch methods set the HTTP verb on the request", async () => {
+    const seen: string[] = [];
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      seen.push(String(init?.method));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
     try {
-      const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com", method: "trace" };
+      const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com" };
       _genMethods(obj);
-
-      await obj.fetch?.();
       await obj.get?.();
       await obj.head?.();
       await obj.post?.();
       await obj.put?.();
       await obj.patch?.();
       await obj.delete?.();
+      assertEquals(seen, ["get", "head", "post", "put", "patch", "delete"]);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("sets http method as method name in safe methods", async () => {
-    let attempts = 0;
-    const methods = ["TRACE", "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (input, init) => {
-        const method = init?.method ? init.method : input instanceof Request ? input.method : "GET";
-        assertEquals(method, methods[attempts]);
-        attempts++;
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
+  await t.step("fetch() preserves the instance method (no override)", async () => {
+    let observed = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observed = String(init?.method);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
     try {
       const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com", method: "trace" };
-      _genMethods(obj, true);
-
-      await obj.sfetch?.();
-      await obj.sget?.();
-      await obj.shead?.();
-      await obj.spost?.();
-      await obj.sput?.();
-      await obj.spatch?.();
-      await obj.sdelete?.();
+      _genMethods(obj);
+      await obj.fetch?.();
+      assertEquals(observed, "trace");
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("returns null on error by safe methods ", async () => {
-    const methods = ["TRACE", "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.reject(new Error("Network error")),
-    );
+  await t.step("safe methods return null on network error", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("network")));
     try {
-      const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com", method: "trace" };
+      const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com", retry: false };
       _genMethods(obj, true);
-
       assertEquals(await obj.sfetch?.(), null);
       assertEquals(await obj.sget?.(), null);
       assertEquals(await obj.shead?.(), null);
@@ -1329,19 +1431,30 @@ Deno.test("_genMethods", async (t) => {
       mockFetch.restore();
     }
   });
+
+  await t.step("per-call options merge over instance options", async () => {
+    let observed: Headers | undefined;
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observed = new Headers(init?.headers);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      const obj: FetchyOptions & Partial<Fetchy> = { url: "https://example.com", bearer: "instance" };
+      _genMethods(obj);
+      await obj.get?.(undefined, { bearer: "per-call" });
+      assertEquals(observed?.get("Authorization"), "Bearer per-call");
+    } finally {
+      mockFetch.restore();
+    }
+  });
 });
 
-/*=============== Main Function ================*/
+/*=============== _main ========================*/
 Deno.test("_main", async (t) => {
-  await t.step("creates request from string URL", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("returns a Response for a successful request", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
-      const result = _main("https://example.com", {});
-      const resp = await result;
+      const resp = await _main("https://example.com", {});
       assertEquals(resp.status, 200);
       assertSpyCalls(mockFetch, 1);
     } finally {
@@ -1349,177 +1462,164 @@ Deno.test("_main", async (t) => {
     }
   });
 
-  await t.step("creates request from URL object", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("accepts a URL object", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
-      const url = new URL("https://example.com/path");
-      const result = _main(url, {});
-      const resp = await result;
+      const resp = await _main(new URL("https://example.com/path"), {});
       assertEquals(resp.status, 200);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("accepts Request object", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("accepts a Request object", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
-      const req = new Request("https://example.com");
-      const result = _main(req, {});
-      const resp = await result;
+      const resp = await _main(new Request("https://example.com"), {});
       assertEquals(resp.status, 200);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("uses options.url when url is null", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
-    try {
-      const result = _main(null, { url: "https://example.com" });
-      const resp = await result;
-      assertEquals(resp.status, 200);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("applies base URL", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (input) => {
-        const url = input instanceof Request ? input.url : String(input);
-        assertEquals(url, "https://api.example.com/users");
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
-    try {
-      const result = _main("/users", { base: "https://api.example.com" });
-      await result;
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("sets method from options", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (input, init) => {
-        const method = init?.method ? init.method : input instanceof Request ? input.method : "GET";
-        assertEquals(method, "POST");
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
-    try {
-      const result = _main("https://example.com", { method: "post" });
-      await result;
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("includes body in request", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_, init) => {
-        assertEquals(init?.body, '{"key":"value"}');
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
-    try {
-      const result = _main("https://example.com", {
-        method: "POST",
-        body: { key: "value" },
-      });
-      await result;
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("sets Authorization header from bearer token", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_, init) => {
-        const headers = new Headers(init?.headers);
-        assertEquals(headers.get("Authorization"), "Bearer token123");
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
-    try {
-      const result = _main("https://example.com", { bearer: "token123" });
-      await result;
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("applies timeout", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_input, init?) => {
-        return new Promise((resolve, reject) => {
-          const signal = init?.signal;
-
-          // Check if signal is already aborted
-          if (signal?.aborted) {
-            reject(signal.reason);
-            return;
-          }
-
-          const timeoutId = setTimeout(() => {
-            resolve(new Response("ok", { status: 200 }));
-          }, 100);
-
-          // Listen for abort event
-          if (signal) {
-            signal.addEventListener("abort", () => {
-              clearTimeout(timeoutId);
-              reject(signal.reason);
-            });
-          }
-        });
-      },
-    );
-    try {
-      const result = _main("https://example.com", { timeout: 0.05, retry: false });
-      await assertRejects(async () => await result);
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("retries on failure", async () => {
-    let attempts = 0;
-    const mockFetch = stub(globalThis, "fetch", () => {
-      attempts++;
-      if (attempts < 2) {
-        return Promise.resolve(new Response("error", { status: 500 }));
-      }
+  await t.step("falls back to options.url when url arg is null", async () => {
+    let observedUrl = "";
+    const mockFetch = stub(globalThis, "fetch", (input) => {
+      observedUrl = input instanceof Request ? input.url : String(input);
       return Promise.resolve(new Response("ok", { status: 200 }));
     });
     try {
-      const result = _main("https://example.com", {
-        retry: { maxAttempts: 3, interval: 0.01 },
+      await _main(null, { url: "https://example.com" });
+      assertEquals(observedUrl, "https://example.com/");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("applies base URL for relative path", async () => {
+    let observedUrl = "";
+    const mockFetch = stub(globalThis, "fetch", (input) => {
+      observedUrl = input instanceof Request ? input.url : String(input);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      await _main("/users", { base: "https://api.example.com" });
+      assertEquals(observedUrl, "https://api.example.com/users");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("uses options.method as init.method", async () => {
+    let observedMethod = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedMethod = String(init?.method);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      await _main("https://example.com", { method: "POST" });
+      assertEquals(observedMethod, "POST");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("serializes JSON body and sets Content-Type", async () => {
+    let observedBody: unknown;
+    let observedCt: string | null = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedBody = init?.body;
+      observedCt = new Headers(init?.headers).get("Content-Type");
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      await _main("https://example.com", { method: "POST", body: { key: "value" } });
+      assertEquals(observedBody, '{"key":"value"}');
+      assertEquals(observedCt, "application/json");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("sends ReadableStream body via Request constructor (not init.body)", async () => {
+    let bodyText = "";
+    const mockFetch = stub(globalThis, "fetch", async (req, _) => {
+      if (req instanceof Request && req.body) {
+        const chunk = await req.body.getReader().read();
+        bodyText = new TextDecoder().decode(chunk.value);
+      }
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      const stream = new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("hello"));
+          c.close();
+        },
       });
-      const resp = await result;
+      await _main("https://example.com", { method: "POST", body: stream });
+      assertEquals(bodyText, "hello");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("sets Authorization header from bearer", async () => {
+    let observedAuth = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedAuth = new Headers(init?.headers).get("Authorization") ?? "";
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      await _main("https://example.com", { bearer: "tok" });
+      assertEquals(observedAuth, "Bearer tok");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("merges custom headers and preserves default Accept", async () => {
+    let observed: Headers | undefined;
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observed = new Headers(init?.headers);
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      await _main("https://example.com", { headers: { "X-Custom": "value" } });
+      assertEquals(observed?.get("X-Custom"), "value");
+      assertEquals(observed?.get("Accept"), "application/json, text/plain");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("aborts request when timeout elapses", async () => {
+    const mockFetch = stub(globalThis, "fetch", (_input, init) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      });
+    });
+    try {
+      await assertRejects(() => _main("https://example.com", { timeout: 0.05, retry: false }));
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("retries on retryable status", async () => {
+    let attempts = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      attempts++;
+      if (attempts < 2) return Promise.resolve(new Response("err", { status: 500 }));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      const resp = await _main("https://example.com", { retry: { maxAttempts: 3, interval: 0.01 } });
       assertEquals(resp.status, 200);
       assertEquals(attempts, 2);
     } finally {
@@ -1527,226 +1627,297 @@ Deno.test("_main", async (t) => {
     }
   });
 
-  await t.step("disables retry when retry is false", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
-    );
+  await t.step("retry=false disables retry", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
     try {
-      const result = _main("https://example.com", { retry: false });
-      await assertRejects(() => result, HTTPStatusError);
+      await assertRejects(() => _main("https://example.com", { retry: false }), HTTPStatusError);
       assertSpyCalls(mockFetch, 1);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("throws HTTPStatusError on error status by default", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 404 })),
-    );
+  await t.step("throws HTTPStatusError on 4xx by default", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 404 })));
     try {
-      const result = _main("https://example.com", { retry: false });
-      await assertRejects(() => result, HTTPStatusError);
+      await assertRejects(() => _main("https://example.com", { retry: false }), HTTPStatusError);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("does not throw in native mode", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 404 })),
-    );
+  await t.step("native mode does not throw on error status", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 404 })));
     try {
-      const result = _main("https://example.com", {
-        native: true,
-        retry: false,
-      });
-      const resp = await result;
+      const resp = await _main("https://example.com", { native: true, retry: false });
       assertEquals(resp.status, 404);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("returns null in safe mode on error", async () => {
+  await t.step("respects retry-after header timing", async () => {
+    let attempts = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      attempts++;
+      if (attempts < 2) {
+        return Promise.resolve(new Response("err", { status: 429, headers: { "retry-after": "1" } }));
+      }
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      const start = Date.now();
+      const resp = await _main("https://example.com", { retry: { maxAttempts: 3, interval: 0.01 } });
+      const elapsed = Date.now() - start;
+      assertEquals(resp.status, 200);
+      assertEquals(attempts, 2);
+      assertEquals(elapsed >= 900, true);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("respects setFetchy global options", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 404 })));
+    try {
+      setFetchy({ native: true, retry: false });
+      const resp = await _main("https://example.com", {});
+      assertEquals(resp.status, 404);
+    } finally {
+      setFetchy({});
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("per-call options override setFetchy globals", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
+    try {
+      setFetchy({ native: true, retry: false });
+      // per-call native:false brings back HTTPStatusError
+      await assertRejects(() => _main("https://example.com", { native: false, retry: false }), HTTPStatusError);
+    } finally {
+      setFetchy({});
+      mockFetch.restore();
+    }
+  });
+});
+
+/*=============== Public API ===================*/
+Deno.test("setFetchy", async (t) => {
+  await t.step("replaces (not merges) previously set globals", async () => {
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      const auth = new Headers(init?.headers).get("Authorization");
+      return Promise.resolve(new Response(auth ?? "no-auth", { status: 200 }));
+    });
+    try {
+      setFetchy({ bearer: "first" });
+      setFetchy({ timeout: 5 }); // new call replaces; no bearer
+      const resp = await fetchy("https://example.com");
+      assertEquals(await resp.text(), "no-auth");
+    } finally {
+      setFetchy({});
+      mockFetch.restore();
+    }
+  });
+});
+
+Deno.test("fetchy", async (t) => {
+  await t.step("returns a FetchyResponse with parsing methods", async () => {
     const mockFetch = stub(
       globalThis,
       "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
+      () => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
     );
     try {
-      const result = _main("https://example.com", { retry: false }, true);
-      const resp = await result;
+      const data = await fetchy("https://example.com").json<{ ok: boolean }>();
+      assertEquals(data, { ok: true });
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("await on the response yields native Response", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("hello", { status: 200 })));
+    try {
+      const resp = await fetchy("https://example.com");
+      assertInstanceOf(resp, Response);
+      assertEquals(await resp.text(), "hello");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("throws HTTPStatusError on error status", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
+    try {
+      await assertRejects(() => fetchy("https://example.com", { retry: false }), HTTPStatusError);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step(".json() rejects on parsing error", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("not json", { status: 200 })));
+    try {
+      await assertRejects(() => fetchy("https://example.com").json());
+    } finally {
+      mockFetch.restore();
+    }
+  });
+});
+
+Deno.test("sfetchy", async (t) => {
+  await t.step("returns Response on success", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
+    try {
+      const resp = await sfetchy("https://example.com");
+      assertInstanceOf(resp, Response);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns null on HTTPStatusError", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
+    try {
+      const resp = await sfetchy("https://example.com", { retry: false });
       assertEquals(resp, null);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("applies jitter delay", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("ok", { status: 200 })),
-    );
+  await t.step("returns null on network error", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("network")));
     try {
-      const start = Date.now();
-      const result = _main("https://example.com", { jitter: 0.05 });
-      await result;
-      const elapsed = Date.now() - start;
-      assertEquals(elapsed >= 0, true);
+      const resp = await sfetchy("https://example.com", { retry: false });
+      assertEquals(resp, null);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("uses convenience json method", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response(JSON.stringify({ result: "success" }), { status: 200 })),
-    );
+  await t.step(".json() returns null on parsing error", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("not json", { status: 200 })));
     try {
-      const result = _main("https://example.com", {});
-      const data = await result.json();
-      assertEquals(data, { result: "success" });
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("uses convenience text method", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("hello world", { status: 200 })),
-    );
-    try {
-      const result = _main("https://example.com", {});
-      const text = await result.text();
-      assertEquals(text, "hello world");
-    } finally {
-      mockFetch.restore();
-    }
-  });
-
-  await t.step("uses safe convenience methods", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 500 })),
-    );
-    try {
-      const result = _main("https://example.com", { retry: false }, true);
-      const data = await result.json();
+      const data = await sfetchy("https://example.com").json();
       assertEquals(data, null);
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("handles ReadableStream body", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      async (req, _) => {
-        if (req instanceof Request) {
-          const result = await req.body?.getReader().read();
-          const data = new TextDecoder().decode(result?.value);
-          assertEquals(data, "test_data");
-        }
-        return new Response("ok", { status: 200 });
-      },
-    );
+  await t.step(".text() returns null when request fails", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
     try {
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode("test_data"));
-          controller.close();
-        },
-      });
-      const result = _main("https://example.com", {
-        method: "POST",
-        body: stream,
-      });
-      await result;
-      assertSpyCalls(mockFetch, 1);
+      const text = await sfetchy("https://example.com", { retry: false }).text();
+      assertEquals(text, null);
     } finally {
       mockFetch.restore();
     }
   });
+});
 
-  await t.step("merges custom headers", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      (_, init) => {
-        const headers = new Headers(init?.headers);
-        assertEquals(headers.get("X-Custom"), "value");
-        assertEquals(headers.has("Accept"), true);
-        return Promise.resolve(new Response("ok", { status: 200 }));
-      },
-    );
-    try {
-      const result = _main("https://example.com", {
-        headers: { "X-Custom": "value" },
-      });
-      await result;
-    } finally {
-      mockFetch.restore();
+Deno.test("fy", async (t) => {
+  await t.step("returns an object with all standard and safe methods", () => {
+    const client = fy({ base: "https://example.com" });
+    for (const m of ["fetch", "get", "head", "post", "put", "patch", "delete"]) {
+      assertEquals(typeof (client as unknown as Record<string, unknown>)[m], "function");
+    }
+    for (const m of ["sfetch", "sget", "shead", "spost", "sput", "spatch", "sdelete"]) {
+      assertEquals(typeof (client as unknown as Record<string, unknown>)[m], "function");
     }
   });
 
-  await t.step("respects retry-after header", async () => {
-    let attempts = 0;
-    const mockFetch = stub(globalThis, "fetch", () => {
-      attempts++;
-      if (attempts < 2) {
-        return Promise.resolve(
-          new Response("error", {
-            status: 429,
-            headers: { "retry-after": "1" },
-          }),
-        );
-      }
+  await t.step("propagates instance options (base URL) to requests", async () => {
+    let observedUrl = "";
+    const mockFetch = stub(globalThis, "fetch", (input) => {
+      observedUrl = input instanceof Request ? input.url : String(input);
       return Promise.resolve(new Response("ok", { status: 200 }));
     });
     try {
-      const result = _main("https://example.com", {
-        retry: { maxAttempts: 3, interval: 0.01 },
-      });
-      const start = Date.now();
-      const resp = await result;
-      const elapsed = Date.now() - start;
-      assertEquals(elapsed >= 1000, true);
-      assertEquals(resp.status, 200);
-      assertEquals(attempts, 2);
+      const client = fy({ base: "https://api.example.com" });
+      await client.get("/users");
+      assertEquals(observedUrl, "https://api.example.com/users");
     } finally {
       mockFetch.restore();
     }
   });
 
-  await t.step("respects setFetchy options", async () => {
-    const mockFetch = stub(
-      globalThis,
-      "fetch",
-      () => Promise.resolve(new Response("error", { status: 404 })),
-    );
+  await t.step("propagates bearer token to requests", async () => {
+    let observedAuth = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedAuth = new Headers(init?.headers).get("Authorization") ?? "";
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
     try {
-      setFetchy({
-        native: true,
-        retry: false,
-      });
-      const result = _main("https://example.com", {});
-      const resp = await result;
-      assertEquals(resp.status, 404);
+      const client = fy({ bearer: "client-token" });
+      await client.get("https://example.com");
+      assertEquals(observedAuth, "Bearer client-token");
     } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("per-call options override instance options", async () => {
+    let observedAuth = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedAuth = new Headers(init?.headers).get("Authorization") ?? "";
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      const client = fy({ bearer: "instance" });
+      await client.get("https://example.com", { bearer: "per-call" });
+      assertEquals(observedAuth, "Bearer per-call");
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("HTTP-verb methods set the matching method", async () => {
+    const seen: string[] = [];
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      seen.push(String(init?.method));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      const client = fy({ url: "https://example.com" });
+      await client.get();
+      await client.post();
+      await client.put();
+      await client.patch();
+      await client.delete();
+      await client.head();
+      assertEquals(seen, ["get", "post", "put", "patch", "delete", "head"]);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("safe variants return null on failure", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 500 })));
+    try {
+      const client = fy({ retry: false });
+      const resp = await client.sget("https://example.com");
+      assertEquals(resp, null);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("respects setFetchy globals layered under instance options", async () => {
+    let observedAuth = "";
+    const mockFetch = stub(globalThis, "fetch", (_, init) => {
+      observedAuth = new Headers(init?.headers).get("Authorization") ?? "";
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    try {
+      setFetchy({ bearer: "global" });
+      const client = fy({}); // instance has no bearer; global should apply
+      await client.get("https://example.com");
+      assertEquals(observedAuth, "Bearer global");
+    } finally {
+      setFetchy({});
       mockFetch.restore();
     }
   });

@@ -416,8 +416,8 @@ async function _waitInterval(count: number, options: Options, headers?: Headers)
   return true;
 }
 /** Determines whether to retry based on conditions and waits before next attempt. @internal */
-async function _shouldRetry(count: number, options: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
-  if (options.noIdempotent || count >= options.maxAttempts - 1 || !fn) return false;
+async function _shouldRetry(count: number, options: Options, r: Response | unknown): Promise<boolean> {
+  if (options.noIdempotent || count >= options.maxAttempts - 1) return false;
   if (r instanceof Response) {
     if (options.native || !options.statusCodes.includes(r.status)) return false;
 
@@ -452,12 +452,12 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
     try {
       if (i === 0) creq = _cloneRequestF(_includeStream(req, options));
       const res = await _fetchWithJitter(await creq!(), init, options);
-      if (await _shouldRetry(i, options, res, creq)) continue;
+      if (await _shouldRetry(i, options, res)) continue;
       if ((res.status >= 400 || res.status < 100) && !options.native) throw new HTTPStatusError(res);
       cancel = true;
       return res;
     } catch (e) {
-      if (await _shouldRetry(i, options, e, creq)) continue;
+      if (await _shouldRetry(i, options, e)) continue;
       cancel = true;
       throw e;
     } finally {
