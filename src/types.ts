@@ -11,6 +11,12 @@ export type JSONValue = string | number | boolean | null | JSONValue[] | { [key:
 export type FetchyBody = JSONValue | BodyInit;
 
 /**
+ * Reviver function passed as the second argument to `JSON.parse`.
+ * Used via `JSONParseOptions.reviver` to transform values during parsing.
+ */
+export type JSONReviver = Parameters<typeof JSON.parse>[1];
+
+/**
  * Configuration options for fetchy requests.
  * Extends standard RequestInit but provides additional features like timeout, retry, and error handling.
  *
@@ -112,9 +118,100 @@ export interface RetryOptions {
 }
 
 /**
- * Promise-like response object that extends Promise<Response> with convenience methods.
+ * Options for `FetchyResponse.json`.
+ *
+ * @example
+ * ```ts
+ * const user = await res.json<User>({
+ *   safe: true,
+ *   refine: (v) => UserSchema.parse(v),
+ *   reviver: (_, v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? new Date(v) : v,
+ * });
+ * ```
+ */
+export interface JSONParseOptions<T> {
+  /**
+   * If true, returns `null` instead of throwing on parse, reviver, or refine errors.
+   * @default false
+   */
+  safe?: boolean;
+  /** Validates or transforms the parsed value. Thrown errors are caught when `safe: true`. */
+  refine?: (v: unknown) => T | Promise<T>;
+  /** Reviver function passed as the second argument to `JSON.parse`. */
+  reviver?: JSONReviver;
+}
+
+/**
+ * Extended `Headers` with a typed `parse` method for converting header values.
+ * Returned as `response.headers` from `FetchyResponse`.
+ * Still satisfies `instanceof Headers`.
+ *
+ * @example
+ * ```ts
+ * const res = await fetchy("https://api.example.com/data");
+ *
+ * // With default value when header is missing
+ * const limit = res.headers.parse("x-rate-limit", Number, 0);
+ *
+ * // Parser handles `null` itself when header is missing
+ * const date = res.headers.parse("date", (v) => v ? new Date(v) : null);
+ * ```
+ */
+export interface FetchyHeaders extends Headers {
+  /** Parses a header value with `parser`, returning `dflt` when the header is missing. */
+  parse<T>(key: string, parser: (v: string) => T, dflt: T): T;
+  /** Parses a header value with `parser`, passing `null` when the header is missing. */
+  parse<T>(key: string, parser: (v: string | null) => T): T;
+}
+
+/**
+ * Extended `Response` returned by `fetchy` / `sfetchy` after awaiting.
+ * Adds an optional `safe` flag to body parsing methods (returns `null` on failure instead of throwing)
+ * and replaces `headers` with `FetchyHeaders`.
+ * Still satisfies `instanceof Response`.
+ *
+ * @example
+ * ```ts
+ * const res = await fetchy("https://api.example.com/data");
+ *
+ * // Standard parsing (throws on error)
+ * const user = await res.json<User>();
+ * const text = await res.text();
+ *
+ * // Safe parsing (returns null on error)
+ * const userOrNull = await res.json<User>({ safe: true });
+ * const textOrNull = await res.text(true);
+ *
+ * // JSON with validation and reviver
+ * const validated = await res.json<User>({ refine: (v) => UserSchema.parse(v) });
+ * ```
+ */
+export interface FetchyResponse extends Response {
+  readonly headers: FetchyHeaders;
+  /** Parses response body as text. */
+  text(safe?: false): Promise<string>;
+  text(safe: boolean): Promise<string | null>;
+  /** Parses response body as JSON with optional type parameter. */
+  json<T>(options?: JSONParseOptions<T> & { safe?: false }): Promise<T>;
+  json<T>(options: JSONParseOptions<T>): Promise<T | null>;
+  /** Parses response body as Uint8Array. */
+  bytes(safe?: false): Promise<Uint8Array<ArrayBuffer>>;
+  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | null>;
+  /** Parses response body as Blob. */
+  blob(safe?: false): Promise<Blob>;
+  blob(safe: boolean): Promise<Blob | null>;
+  /** Parses response body as ArrayBuffer. */
+  arrayBuffer(safe?: false): Promise<ArrayBuffer>;
+  arrayBuffer(safe: boolean): Promise<ArrayBuffer | null>;
+  /** Parses response body as FormData. */
+  formData(safe?: false): Promise<FormData>;
+  formData(safe: boolean): Promise<FormData | null>;
+}
+
+/**
+ * Promise-like response object that extends `Promise<FetchyResponse>` with convenience methods.
  * Provides methods to parse response body in various formats.
- * All methods return parsed data directly without needing to await the Response first.
+ * All methods return parsed data directly without needing to await the FetchyResponse first.
  *
  * @example
  * ```ts
@@ -127,25 +224,31 @@ export interface RetryOptions {
  * const bytes = await fetchy("https://example.com/file").bytes();
  * ```
  */
-export interface FetchyResponse extends Promise<Response> {
+export interface FetchyPromise extends Promise<FetchyResponse> {
   /** Parses response body as text. */
-  text: () => Promise<string>;
+  text(safe?: false): Promise<string>;
+  text(safe: boolean): Promise<string | null>;
   /** Parses response body as JSON with optional type parameter. */
-  json: <T>() => Promise<T>;
+  json<T>(options?: JSONParseOptions<T> & { safe?: false }): Promise<T>;
+  json<T>(options: JSONParseOptions<T>): Promise<T | null>;
   /** Parses response body as Uint8Array. */
-  bytes: () => Promise<Uint8Array<ArrayBuffer>>;
+  bytes(safe?: false): Promise<Uint8Array<ArrayBuffer>>;
+  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | null>;
   /** Parses response body as Blob. */
-  blob: () => Promise<Blob>;
+  blob(safe?: false): Promise<Blob>;
+  blob(safe: boolean): Promise<Blob | null>;
   /** Parses response body as ArrayBuffer. */
-  arrayBuffer: () => Promise<ArrayBuffer>;
+  arrayBuffer(safe?: false): Promise<ArrayBuffer>;
+  arrayBuffer(safe: boolean): Promise<ArrayBuffer | null>;
   /** Parses response body as FormData. */
-  formData: () => Promise<FormData>;
+  formData(safe?: false): Promise<FormData>;
+  formData(safe: boolean): Promise<FormData | null>;
 }
 
 /**
- * Promise-like response object for safe mode that extends Promise<Response | null>.
+ * Promise-like response object for safe mode that extends `Promise<FetchyResponse | null>`.
  * Returns null instead of throwing errors on request failure.
- * Provides the same convenience methods as FetchyResponse.
+ * Provides the same convenience methods as FetchyPromise.
  *
  * @example
  * ```ts
@@ -159,19 +262,19 @@ export interface FetchyResponse extends Promise<Response> {
  * const data = await sfetchy("https://api.example.com/data").json<User>();
  * ```
  */
-export interface FetchySafeResponse extends Promise<Response | null> {
+export interface FetchySafePromise extends Promise<FetchyResponse | null> {
   /** Parses response body safely as text. */
-  text: () => Promise<string | null>;
+  text(): Promise<string | null>;
   /** Parses response body safely as JSON with optional type parameter. */
-  json: <T>() => Promise<T | null>;
+  json<T>(options?: Omit<JSONParseOptions<T>, "safe">): Promise<T | null>;
   /** Parses response body safely as Uint8Array. */
-  bytes: () => Promise<Uint8Array<ArrayBuffer> | null>;
+  bytes(): Promise<Uint8Array<ArrayBuffer> | null>;
   /** Parses response body safely as Blob. */
-  blob: () => Promise<Blob | null>;
+  blob(): Promise<Blob | null>;
   /** Parses response body safely as ArrayBuffer. */
-  arrayBuffer: () => Promise<ArrayBuffer | null>;
+  arrayBuffer(): Promise<ArrayBuffer | null>;
   /** Parses response body safely as FormData. */
-  formData: () => Promise<FormData | null>;
+  formData(): Promise<FormData | null>;
 }
 /**
  * Fluent HTTP client interface with pre-configured options.
@@ -219,7 +322,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object with parsing methods.
    */
-  fetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  fetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs GET request with instance options.
@@ -228,7 +331,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object with parsing methods.
    */
-  get(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  get(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs HEAD request with instance options.
@@ -238,7 +341,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise resolving to Response object.
    */
-  head(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response>;
+  head(url?: string | URL | Request | null, options?: FetchyOptions): Promise<FetchyResponse>;
 
   /**
    * Performs POST request with instance options.
@@ -247,7 +350,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object with parsing methods.
    */
-  post(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  post(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs PUT request with instance options.
@@ -256,7 +359,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object with parsing methods.
    */
-  put(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  put(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs PATCH request with instance options.
@@ -265,7 +368,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object with parsing methods.
    */
-  patch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  patch(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs DELETE request with instance options.
@@ -274,7 +377,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object with parsing methods.
    */
-  delete(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse;
+  delete(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise;
 
   /**
    * Performs HTTP request in safe mode with instance options.
@@ -285,7 +388,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object that resolves to Response or null.
    */
-  sfetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  sfetch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 
   /**
    * Performs GET request in safe mode with instance options.
@@ -295,7 +398,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object that resolves to Response or null.
    */
-  sget(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  sget(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 
   /**
    * Performs HEAD request in safe mode with instance options.
@@ -305,7 +408,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise resolving to Response or null.
    */
-  shead(url?: string | URL | Request | null, options?: FetchyOptions): Promise<Response | null>;
+  shead(url?: string | URL | Request | null, options?: FetchyOptions): Promise<FetchyResponse | null>;
 
   /**
    * Performs POST request in safe mode with instance options.
@@ -315,7 +418,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object that resolves to Response or null.
    */
-  spost(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  spost(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 
   /**
    * Performs PUT request in safe mode with instance options.
@@ -325,7 +428,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object that resolves to Response or null.
    */
-  sput(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  sput(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 
   /**
    * Performs PATCH request in safe mode with instance options.
@@ -335,7 +438,7 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options (typically includes `body`).
    * @returns Promise-like response object that resolves to Response or null.
    */
-  spatch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  spatch(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 
   /**
    * Performs DELETE request in safe mode with instance options.
@@ -345,5 +448,5 @@ export interface Fetchy extends FetchyOptions {
    * @param options - Additional options to merge with instance options.
    * @returns Promise-like response object that resolves to Response or null.
    */
-  sdelete(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse;
+  sdelete(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise;
 }

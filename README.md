@@ -10,7 +10,7 @@ A lightweight thin fetch wrapper with built-in retry logic, timeout handling, an
 ## Features
 
 - **Simple API** - Drop-in replacement for native fetch with enhanced capabilities
-- **Lightweight** - Bundle size is ~5KB uncompressed, ~3KB gzipped, zero dependencies
+- **Lightweight** - Bundle size is ~6KB uncompressed, ~3KB gzipped, zero dependencies
 - **Native Fetch Compatible** - Thin abstraction layer, easy migration back to native fetch
 - **Promise-like Interface** - Chain parsing methods directly on fetch results
 - **Timeout Support** - Configurable request timeouts with automatic cancellation
@@ -20,6 +20,9 @@ A lightweight thin fetch wrapper with built-in retry logic, timeout handling, an
 - **Jitter Support** - Prevent thundering herd with randomized delays
 - **Fluent Interface** - Class-based API with both instance and static methods
 - **HTTP Method Shortcuts** - Convenient methods for GET, POST, PUT, PATCH, DELETE
+- **Per-Call Safe Parsing** - Each body parser accepts an optional `safe` flag to return `null` on failure
+- **JSON Refinement** - Optional validator/reviver for type-safe JSON parsing
+- **Typed Header Parsing** - Built-in `parse` helper on `response.headers` for value conversion
 
 ## Installation
 ```bash
@@ -50,6 +53,12 @@ const client = fy({
   retry: { maxAttempts: 5 }
 });
 const posts = await client.get("/posts").json<Post[]>();
+
+// Per-call safe parsing with validation
+const userOrNull = await client.get("/user").json<User>({
+  safe: true,
+  refine: (v) => UserSchema.parse(v)
+});
 ```
 
 ## API Reference
@@ -65,14 +74,16 @@ Performs an HTTP request with enhanced features. Returns a promise-like object t
 
 #### Returns
 
-`FetchyResponse` - A promise-like object that extends `Promise<Response>` with the following methods:
+`FetchyPromise` - A promise-like object that extends `Promise<FetchyResponse>` with convenience parsing methods:
 
 - `text()` → `Promise<string>` - Parse response as text
-- `json<T>()` → `Promise<T>` - Parse response as JSON
+- `json<T>(options?)` → `Promise<T>` / `Promise<T | null>` - Parse response as JSON (accepts full `JSONParseOptions`: `safe`, `refine`, `reviver`)
 - `bytes()` → `Promise<Uint8Array>` - Parse response as byte array
 - `blob()` → `Promise<Blob>` - Parse response as Blob
 - `arrayBuffer()` → `Promise<ArrayBuffer>` - Parse response as ArrayBuffer
 - `formData()` → `Promise<FormData>` - Parse response as FormData
+
+The awaited result is a `FetchyResponse` (extends `Response`, satisfies `instanceof Response`) whose parse methods additionally accept a `safe` flag to return `null` on failure. See [FetchyResponse](#fetchyresponse) and [FetchyPromise / FetchySafePromise](#fetchypromise--fetchysafepromise) below.
 
 #### Example
 ```ts
@@ -103,10 +114,10 @@ Same as `fetchy()`.
 
 #### Returns
 
-`FetchySafeResponse` - A promise-like object that extends `Promise<Response | null>` with the same parsing methods as `FetchyResponse`.
+`FetchySafePromise` - A promise-like object that extends `Promise<FetchyResponse | null>` with the same parsing methods as `FetchyPromise`, all returning `null` on any failure.
 
 - `text()` → `Promise<string | null>` - Safe text parsing (returns null on error)
-- `json<T>()` → `Promise<T | null>` - Safe JSON parsing (returns null on error)
+- `json<T>(options?)` → `Promise<T | null>` - Safe JSON parsing (accepts `refine` and `reviver`; `safe` is implicit and cannot be specified)
 - `bytes()` → `Promise<Uint8Array | null>` - Safe bytes parsing (returns null on error)
 - `blob()` → `Promise<Blob | null>` - Safe blob parsing (returns null on error)
 - `arrayBuffer()` → `Promise<ArrayBuffer | null>` - Safe buffer parsing (returns null on error)
@@ -138,24 +149,24 @@ Creates a fluent HTTP client with pre-configured options that provides HTTP meth
 const client = fy(options);
 
 // Main fetch method
-await client.fetch(url?, options?)    // Returns FetchyResponse
+await client.fetch(url?, options?)    // Returns FetchyPromise
 
 // HTTP method shortcuts
-await client.get(url?, options?)      // GET request, returns FetchyResponse
-await client.post(url?, options?)     // POST request, returns FetchyResponse
-await client.put(url?, options?)      // PUT request, returns FetchyResponse
-await client.patch(url?, options?)    // PATCH request, returns FetchyResponse
-await client.delete(url?, options?)   // DELETE request, returns FetchyResponse
-await client.head(url?, options?)     // HEAD request, returns Promise<Response>
+await client.get(url?, options?)      // GET request, returns FetchyPromise
+await client.post(url?, options?)     // POST request, returns FetchyPromise
+await client.put(url?, options?)      // PUT request, returns FetchyPromise
+await client.patch(url?, options?)    // PATCH request, returns FetchyPromise
+await client.delete(url?, options?)   // DELETE request, returns FetchyPromise
+await client.head(url?, options?)     // HEAD request, returns Promise<FetchyResponse>
 
 // Safe mode methods
-await client.sfetch(url?, options?)   // Returns FetchySafeResponse
-await client.sget(url?, options?)     // Safe GET, returns FetchySafeResponse
-await client.spost(url?, options?)    // Safe POST, returns FetchySafeResponse
-await client.sput(url?, options?)     // Safe PUT, returns FetchySafeResponse
-await client.spatch(url?, options?)   // Safe PATCH, returns FetchySafeResponse
-await client.sdelete(url?, options?)  // Safe DELETE, returns FetchySafeResponse
-await client.shead(url?, options?)    // Safe HEAD, returns Promise<Response | null>
+await client.sfetch(url?, options?)   // Returns FetchySafePromise
+await client.sget(url?, options?)     // Safe GET, returns FetchySafePromise
+await client.spost(url?, options?)    // Safe POST, returns FetchySafePromise
+await client.sput(url?, options?)     // Safe PUT, returns FetchySafePromise
+await client.spatch(url?, options?)   // Safe PATCH, returns FetchySafePromise
+await client.sdelete(url?, options?)  // Safe DELETE, returns FetchySafePromise
+await client.shead(url?, options?)    // Safe HEAD, returns Promise<FetchyResponse | null>
 ```
 
 All methods can be chained with parsing methods:
@@ -298,6 +309,111 @@ The following headers are automatically set if not specified:
 
 **Note:** Headers from Request objects are preserved and merged with option headers.
 
+## Response Handling
+
+### FetchyResponse
+
+The awaited result of `fetchy()` / `sfetchy()`. Extends native `Response` with:
+
+- **Safe-mode parse methods** - Each body parser accepts an optional `safe` flag to return `null` on failure
+- **JSON options** - `json()` accepts `{ refine, reviver, safe }` for validated/transformed parsing
+- **Extended headers** - `response.headers` is `FetchyHeaders` with a typed `parse` method
+
+`FetchyResponse instanceof Response` is `true`, and `response.headers instanceof Headers` is `true`.
+
+#### Body Parsing
+```ts
+const res = await fetchy("https://api.example.com/data");
+
+// Standard - throws on parse error
+const user = await res.json<User>();
+const text = await res.text();
+
+// Safe - returns null on parse error
+const userOrNull = await res.json<User>({ safe: true });
+const textOrNull = await res.text(true);
+
+// JSON with validation (throws if UserSchema.parse fails)
+const validated = await res.json<User>({
+  refine: (v) => UserSchema.parse(v)
+});
+
+// JSON with reviver
+const withDates = await res.json<Post>({
+  reviver: (_, v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? new Date(v) : v
+});
+
+// Combined: safe + refine (returns null if validation fails)
+const safeValidated = await res.json<User>({
+  safe: true,
+  refine: (v) => UserSchema.parse(v)
+});
+```
+
+#### Header Parsing
+
+`response.headers.parse()` provides typed conversion with optional default:
+```ts
+const res = await fetchy("https://api.example.com/data");
+
+// With default value when header is missing
+const limit = res.headers.parse("x-rate-limit", Number, 0);
+
+// Parser handles null when header is missing
+const date = res.headers.parse("date", (v) => v ? new Date(v) : null);
+```
+
+#### `JSONParseOptions`
+```ts
+interface JSONParseOptions<T> {
+  // If true, returns null instead of throwing on parse, reviver, or refine errors (default: false)
+  safe?: boolean;
+
+  // Validates or transforms the parsed value
+  refine?: (v: unknown) => T | Promise<T>;
+
+  // Reviver function passed to JSON.parse
+  reviver?: (key: string, value: unknown) => unknown;
+}
+```
+
+### FetchyPromise / FetchySafePromise
+
+The promise-like objects returned by `fetchy()` and `sfetchy()`. They forward parse calls to the resolved `FetchyResponse`, allowing direct chaining without an intermediate `await`. The two differ in how they handle the `safe` option:
+
+#### `FetchyPromise.json`
+
+Accepts the full `JSONParseOptions<T>` (same as `FetchyResponse.json`). The return type narrows based on `safe`:
+
+```ts
+const user = await fetchy(url).json<User>();                       // Promise<User>
+const user = await fetchy(url).json<User>({ refine });             // Promise<User>
+const userOrNull = await fetchy(url).json<User>({ safe: true });   // Promise<User | null>
+```
+
+#### `FetchySafePromise.json`
+
+Always operates in safe mode — `safe` cannot be specified and all parse/refine errors are caught and converted to `null`. The option type is `Omit<JSONParseOptions<T>, "safe">`:
+
+```ts
+const user = await sfetchy(url).json<User>();           // Promise<User | null>
+const user = await sfetchy(url).json<User>({ refine }); // Promise<User | null>
+```
+
+#### Safe Fetch with Strict Parse
+
+If you want safe handling for the fetch itself (network/HTTP errors → `null`) but strict behavior on body parsing (throw on parse failure), `await` the response first and call `json()` on the resolved `FetchyResponse` instead of chaining directly:
+
+```ts
+// Direct chain: parse errors are silenced as null
+const data = await sfetchy(url).json<User>();
+
+// Two-step alternative: parse errors are thrown
+const res = await sfetchy(url);
+if (res === null) return;            // handle fetch failure
+const data = await res.json<User>();  // throws on parse error
+```
+
 ## Error Handling
 
 ### HTTPStatusError
@@ -338,6 +454,14 @@ const data = await sfetchy("https://api.example.com/data").json<Data>();
 if (data !== null) {
   // Process data
 }
+
+// Strict fetch + safe parse (per-call)
+const dataOrNull = await fetchy("https://api.example.com/data").json<Data>({ safe: true });
+
+// Safe fetch + strict parse (validate body when response exists)
+const res = await sfetchy("https://api.example.com/data");
+if (res === null) return;
+const data2 = await res.json<Data>();  // throws on parse error
 ```
 
 ### Native Mode

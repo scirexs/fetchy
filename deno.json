@@ -1,6 +1,6 @@
 {
   "name": "@scirexs/fetchy",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/mod.ts",
   "publish": {

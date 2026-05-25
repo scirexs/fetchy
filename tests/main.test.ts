@@ -31,6 +31,8 @@ import {
   _isRequest,
   _isString,
   _main,
+  _makeFetchyHeaders,
+  _makeFetchyPromise,
   _makeFetchyResponse,
   _mergeHeaders,
   _mergeSignals,
@@ -1270,93 +1272,624 @@ Deno.test("_fetchWithRetry", async (t) => {
   });
 });
 
+/*=============== Headers Wrapping =============*/
+Deno.test("_makeFetchyHeaders", async (t) => {
+  await t.step("returns the same Headers reference (mutates in place)", () => {
+    const h = new Headers({ "X-Limit": "10" });
+    const fh = _makeFetchyHeaders(h);
+    assertStrictEquals(fh, h);
+  });
+
+  await t.step("result is still instanceof Headers", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    assertInstanceOf(fh, Headers);
+  });
+
+  await t.step("adds a parse method", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    assertEquals(typeof fh.parse, "function");
+  });
+
+  await t.step("parse(key, parser, dflt) returns dflt when header missing", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    assertEquals(fh.parse("missing", Number, 0), 0);
+    assertEquals(fh.parse("missing", (v) => v ?? "x", "fallback"), "fallback");
+  });
+
+  await t.step("parse(key, parser, dflt) does not call parser when header is missing", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    let called = false;
+    const result = fh.parse("missing", (v) => {
+      called = true;
+      return v;
+    }, "default");
+    assertEquals(called, false);
+    assertEquals(result, "default");
+  });
+
+  await t.step("parse(key, parser, dflt) calls parser with string value when header is present", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-Limit": "42" }));
+    assertEquals(fh.parse("X-Limit", Number, 0), 42);
+  });
+
+  await t.step("parse(key, parser, dflt) calls parser with value even when dflt is provided", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-V": "hello" }));
+    let received: unknown;
+    fh.parse("X-V", (v) => {
+      received = v;
+      return v;
+    }, "default");
+    assertStrictEquals(received, "hello");
+  });
+
+  await t.step("parse(key, parser, dflt) supports falsy defaults: 0, '', false", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    assertStrictEquals(fh.parse("missing", Number, 0), 0);
+    assertStrictEquals(fh.parse("missing", String, ""), "");
+    assertStrictEquals(fh.parse<boolean>("missing", Boolean, false), false);
+  });
+
+  await t.step("parse(key, parser, dflt) treats null dflt as a valid default (parser not called)", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    let called = false;
+    const result = fh.parse<string | null>("missing", () => {
+      called = true;
+      return "x";
+    }, null);
+    assertEquals(called, false);
+    assertStrictEquals(result, null);
+  });
+
+  await t.step("parse(key, parser) calls parser with null when header is missing", () => {
+    const fh = _makeFetchyHeaders(new Headers());
+    let received: unknown = "unset";
+    const result = fh.parse("missing", (v) => {
+      received = v;
+      return v;
+    });
+    assertStrictEquals(received, null);
+    assertStrictEquals(result, null);
+  });
+
+  await t.step("parse(key, parser) calls parser with string value when header is present", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "date": "2026-01-01" }));
+    const result = fh.parse("date", (v) => v ? new Date(v) : null);
+    assertInstanceOf(result, Date);
+    assertEquals((result as Date).getUTCFullYear(), 2026);
+  });
+
+  await t.step("parse calls parser with empty string when header value is empty", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-Empty": "" }));
+    let received: unknown;
+    fh.parse("X-Empty", (v) => {
+      received = v;
+      return v;
+    }, "dflt-fallback");
+    assertStrictEquals(received, "");
+  });
+
+  await t.step("parse uses case-insensitive header lookup", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-Custom": "value" }));
+    assertEquals(fh.parse("x-custom", (v) => v, ""), "value");
+    assertEquals(fh.parse("X-CUSTOM", (v) => v, ""), "value");
+  });
+
+  await t.step("parser return type is preserved across overloads", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-Count": "3" }));
+    const n: number = fh.parse("X-Count", Number, 0);
+    assertEquals(n, 3);
+    const s: string = fh.parse("X-Count", (v) => `[${v}]`, "");
+    assertEquals(s, "[3]");
+  });
+
+  await t.step("parser exceptions propagate (no internal catch)", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-V": "v" }));
+    assertThrows(
+      () =>
+        fh.parse("X-V", () => {
+          throw new Error("boom");
+        }, ""),
+      Error,
+      "boom",
+    );
+  });
+
+  await t.step("standard Headers methods still work after augmentation", () => {
+    const fh = _makeFetchyHeaders(new Headers({ "X-A": "1" }));
+    assertEquals(fh.get("X-A"), "1");
+    fh.set("X-B", "2");
+    assertEquals(fh.get("X-B"), "2");
+    assertEquals(fh.has("X-A"), true);
+    fh.delete("X-A");
+    assertEquals(fh.has("X-A"), false);
+  });
+});
+
 /*=============== Response Wrapping ============*/
 Deno.test("_makeFetchyResponse", async (t) => {
-  await t.step("non-safe text() parses body", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("hello")));
+  await t.step("returns the same Response reference (mutates in place)", () => {
+    const res = new Response("hello");
+    const fres = _makeFetchyResponse(res);
+    assertStrictEquals(fres, res);
+  });
+
+  await t.step("result is still instanceof Response", () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    assertInstanceOf(fres, Response);
+  });
+
+  await t.step("preserves status, statusText, and url", () => {
+    const fres = _makeFetchyResponse(new Response("x", { status: 201, statusText: "Created" }));
+    assertEquals(fres.status, 201);
+    assertEquals(fres.statusText, "Created");
+  });
+
+  await t.step("headers gain a parse method (FetchyHeaders) with same instance", () => {
+    const original = new Response("x", { headers: { "X-A": "1" } });
+    const before = original.headers;
+    const fres = _makeFetchyResponse(original);
+    assertStrictEquals(fres.headers, before);
+    assertInstanceOf(fres.headers, Headers);
+    assertEquals(typeof fres.headers.parse, "function");
+    assertEquals(fres.headers.parse("X-A", Number, 0), 1);
+  });
+
+  /* --- text() --- */
+  await t.step("text() returns the body string", async () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    assertEquals(await fres.text(), "hello");
+  });
+
+  await t.step("text(false) returns the body string", async () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    assertEquals(await fres.text(false), "hello");
+  });
+
+  await t.step("text() rejects when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    await fres.text();
+    await assertRejects(() => fres.text());
+  });
+
+  await t.step("text(false) (explicit false) rejects when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    await fres.text();
+    await assertRejects(() => fres.text(false));
+  });
+
+  await t.step("text(true) returns null when body cannot be read", async () => {
+    const fres = _makeFetchyResponse(new Response("hello"));
+    await fres.text();
+    assertEquals(await fres.text(true), null);
+  });
+
+  /* --- json() --- */
+  await t.step("json() parses JSON body", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ k: "v" })));
+    assertEquals(await fres.json(), { k: "v" });
+  });
+
+  await t.step("json() with type parameter returns typed result", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ n: 1 })));
+    const result = await fres.json<{ n: number }>();
+    assertEquals(result.n, 1);
+  });
+
+  await t.step("json() rejects on parse error", async () => {
+    const fres = _makeFetchyResponse(new Response("not json"));
+    await assertRejects(() => fres.json());
+  });
+
+  await t.step("json({safe: true}) returns null on parse error", async () => {
+    const fres = _makeFetchyResponse(new Response("not json"));
+    assertEquals(await fres.json({ safe: true }), null);
+  });
+
+  await t.step("json({safe: false}) rejects on parse error", async () => {
+    const fres = _makeFetchyResponse(new Response("not json"));
+    await assertRejects(() => fres.json({ safe: false }));
+  });
+
+  await t.step("json({safe: true}) returns the parsed value on success", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ k: "v" })));
+    assertEquals(await fres.json({ safe: true }), { k: "v" });
+  });
+
+  await t.step("json({reviver}) applies reviver during parse", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ n: 1, m: 2 })));
+    const result = await fres.json<Record<string, number>>({
+      reviver: (_k, v) => typeof v === "number" ? v * 10 : v,
+    });
+    assertEquals(result, { n: 10, m: 20 });
+  });
+
+  await t.step("json({refine}) applies refine to parsed value", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ a: 1 })));
+    const result = await fres.json<{ a: number; b: number }>({
+      refine: (v) => ({ ...(v as { a: number }), b: 2 }),
+    });
+    assertEquals(result, { a: 1, b: 2 });
+  });
+
+  await t.step("json({refine}) supports async refine", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify("x")));
+    const result = await fres.json<string>({
+      refine: (v) => Promise.resolve(`async:${v}`),
+    });
+    assertEquals(result, "async:x");
+  });
+
+  await t.step("json({refine}) without safe rejects when refine throws", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({})));
+    await assertRejects(() =>
+      fres.json({
+        refine: () => {
+          throw new Error("invalid");
+        },
+      })
+    );
+  });
+
+  await t.step("json({refine, safe: true}) returns null when refine throws", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({})));
+    const result = await fres.json({
+      safe: true,
+      refine: () => {
+        throw new Error("invalid");
+      },
+    });
+    assertEquals(result, null);
+  });
+
+  await t.step("json({refine, safe: true}) returns null when async refine rejects", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({})));
+    const result = await fres.json({
+      safe: true,
+      refine: () => Promise.reject(new Error("async invalid")),
+    });
+    assertEquals(result, null);
+  });
+
+  await t.step("json({reviver, refine}) chains reviver then refine", async () => {
+    const fres = _makeFetchyResponse(new Response(JSON.stringify({ n: 1 })));
+    const result = await fres.json<number>({
+      reviver: (_k, v) => typeof v === "number" ? v * 2 : v,
+      refine: (v) => (v as { n: number }).n + 100,
+    });
+    assertEquals(result, 102);
+  });
+
+  await t.step("json({safe: true}) returns null when body cannot be read", async () => {
+    const fres = _makeFetchyResponse(new Response("{}"));
+    await fres.text();
+    assertEquals(await fres.json({ safe: true }), null);
+  });
+
+  /* --- blob() --- */
+  await t.step("blob() returns Blob", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    assertInstanceOf(await fres.blob(), Blob);
+  });
+
+  await t.step("blob() rejects when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.blob();
+    await assertRejects(() => fres.blob());
+  });
+
+  await t.step("blob(true) returns null when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.blob();
+    assertEquals(await fres.blob(true), null);
+  });
+
+  /* --- arrayBuffer() --- */
+  await t.step("arrayBuffer() returns ArrayBuffer", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    assertInstanceOf(await fres.arrayBuffer(), ArrayBuffer);
+  });
+
+  await t.step("arrayBuffer() rejects when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.arrayBuffer();
+    await assertRejects(() => fres.arrayBuffer());
+  });
+
+  await t.step("arrayBuffer(true) returns null when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.arrayBuffer();
+    assertEquals(await fres.arrayBuffer(true), null);
+  });
+
+  /* --- bytes() --- */
+  await t.step("bytes() returns Uint8Array", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    assertInstanceOf(await fres.bytes(), Uint8Array);
+  });
+
+  await t.step("bytes() rejects when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.bytes();
+    await assertRejects(() => fres.bytes());
+  });
+
+  await t.step("bytes(true) returns null when body already consumed", async () => {
+    const fres = _makeFetchyResponse(new Response("data"));
+    await fres.bytes();
+    assertEquals(await fres.bytes(true), null);
+  });
+
+  /* --- formData() --- */
+  await t.step("formData() returns FormData", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const fres = _makeFetchyResponse(new Response(fd));
+    const result = await fres.formData();
+    assertInstanceOf(result, FormData);
+    assertEquals(result.get("k"), "v");
+  });
+
+  await t.step("formData() rejects when body already consumed", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const fres = _makeFetchyResponse(new Response(fd));
+    await fres.formData();
+    await assertRejects(() => fres.formData());
+  });
+
+  await t.step("formData(true) returns null when body already consumed", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const fres = _makeFetchyResponse(new Response(fd));
+    await fres.formData();
+    assertEquals(await fres.formData(true), null);
+  });
+});
+
+/*=============== Promise Wrapping ============*/
+Deno.test("_makeFetchyPromise", async (t) => {
+  /** Build a settled promise resolving to a FetchyResponse from a body. */
+  function fres(body: BodyInit | null, init?: ResponseInit) {
+    return Promise.resolve(_makeFetchyResponse(new Response(body, init)));
+  }
+
+  /* --- non-safe basics --- */
+  await t.step("non-safe: await yields the resolved FetchyResponse", async () => {
+    const inner = _makeFetchyResponse(new Response("x"));
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertStrictEquals(await wrapped, inner);
+  });
+
+  await t.step("non-safe: resolved value is still instanceof Response", async () => {
+    const wrapped = _makeFetchyPromise(fres("x"));
+    assertInstanceOf(await wrapped, Response);
+  });
+
+  await t.step("non-safe: text() returns body", async () => {
+    const wrapped = _makeFetchyPromise(fres("hello"));
     assertEquals(await wrapped.text(), "hello");
   });
 
-  await t.step("non-safe json() parses body", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response(JSON.stringify({ k: "v" }))));
+  await t.step("non-safe: json() returns parsed JSON", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({ k: "v" })));
     assertEquals(await wrapped.json(), { k: "v" });
   });
 
-  await t.step("non-safe blob() returns Blob", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+  await t.step("non-safe: blob() returns Blob", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"));
     assertInstanceOf(await wrapped.blob(), Blob);
   });
 
-  await t.step("non-safe arrayBuffer() returns ArrayBuffer", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+  await t.step("non-safe: arrayBuffer() returns ArrayBuffer", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"));
     assertInstanceOf(await wrapped.arrayBuffer(), ArrayBuffer);
   });
 
-  await t.step("non-safe bytes() returns Uint8Array", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("data")));
+  await t.step("non-safe: bytes() returns Uint8Array", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"));
     assertInstanceOf(await wrapped.bytes(), Uint8Array);
   });
 
-  await t.step("non-safe formData() returns FormData", async () => {
+  await t.step("non-safe: formData() returns FormData", async () => {
     const fd = new FormData();
     fd.append("k", "v");
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response(fd)));
+    const wrapped = _makeFetchyPromise(fres(fd));
     assertInstanceOf(await wrapped.formData(), FormData);
   });
 
-  await t.step("non-safe json() rejects on parsing error", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("not json")));
+  await t.step("non-safe: json() rejects on parse error", async () => {
+    const wrapped = _makeFetchyPromise(fres("not json"));
     await assertRejects(() => wrapped.json());
   });
 
-  await t.step("non-safe await yields original Response", async () => {
-    const original = new Response("x");
-    const wrapped = _makeFetchyResponse(Promise.resolve(original));
-    assertStrictEquals(await wrapped, original);
-  });
-
-  await t.step("non-safe then chains preserve Response", async () => {
-    const original = new Response("x");
-    const wrapped = _makeFetchyResponse(Promise.resolve(original));
+  await t.step("non-safe: then chain preserves the resolved value", async () => {
+    const inner = _makeFetchyResponse(new Response("x"));
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
     const result = await wrapped.then((r) => r);
-    assertStrictEquals(result, original);
+    assertStrictEquals(result, inner);
   });
 
-  await t.step("non-safe catch chains receive errors", async () => {
+  await t.step("non-safe: catch chain receives the rejection error", async () => {
     const err = new Error("boom");
-    const wrapped = _makeFetchyResponse(Promise.reject(err));
+    const wrapped = _makeFetchyPromise(Promise.reject(err));
     const caught = await wrapped.catch((e) => e);
     assertStrictEquals(caught, err);
   });
 
-  await t.step("safe methods return null when promise rejects", async () => {
-    const wrapped = _makeFetchyResponse(Promise.reject(new Error("fail")), true);
-    assertEquals(await wrapped.text(), null);
-    assertEquals(await wrapped.json(), null);
-    assertEquals(await wrapped.blob(), null);
-    assertEquals(await wrapped.arrayBuffer(), null);
-    assertEquals(await wrapped.bytes(), null);
-    assertEquals(await wrapped.formData(), null);
+  await t.step("non-safe: defines all expected verb methods", () => {
+    const wrapped = _makeFetchyPromise(fres("x"));
+    for (const m of ["text", "json", "bytes", "blob", "arrayBuffer", "formData"]) {
+      assertEquals(typeof (wrapped as unknown as Record<string, unknown>)[m], "function");
+    }
   });
 
-  await t.step("safe methods return null when resolved with null", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(null), true);
-    assertEquals(await wrapped.text(), null);
-    assertEquals(await wrapped.json(), null);
-    assertEquals(await wrapped.blob(), null);
-    assertEquals(await wrapped.arrayBuffer(), null);
-    assertEquals(await wrapped.bytes(), null);
-    assertEquals(await wrapped.formData(), null);
+  /* --- non-safe arg forwarding (delegates to FetchyResponse) --- */
+  await t.step("non-safe: text(true) forwards to FetchyResponse and returns null on body re-read", async () => {
+    const inner = _makeFetchyResponse(new Response("hello"));
+    await inner.text();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertEquals(await wrapped.text(true), null);
   });
 
-  await t.step("safe methods return null on parsing failure", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("not json")), true);
-    assertEquals(await wrapped.json(), null);
+  await t.step("non-safe: text(false) forwards to FetchyResponse and rejects on body re-read", async () => {
+    const inner = _makeFetchyResponse(new Response("hello"));
+    await inner.text();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    await assertRejects(() => wrapped.text(false));
   });
 
-  await t.step("safe methods return data on success", async () => {
-    const wrapped = _makeFetchyResponse(Promise.resolve(new Response("hello")), true);
+  await t.step("non-safe: json({safe: true}) forwards and returns null on parse error", async () => {
+    const wrapped = _makeFetchyPromise(fres("not json"));
+    assertEquals(await wrapped.json({ safe: true }), null);
+  });
+
+  await t.step("non-safe: json({reviver, refine}) options are forwarded", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({ n: 1 })));
+    const result = await wrapped.json<number>({
+      reviver: (_k, v) => typeof v === "number" ? v * 2 : v,
+      refine: (v) => (v as { n: number }).n + 100,
+    });
+    assertEquals(result, 102);
+  });
+
+  await t.step("non-safe: blob(true) forwards and returns null on re-read", async () => {
+    const inner = _makeFetchyResponse(new Response("data"));
+    await inner.blob();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertEquals(await wrapped.blob(true), null);
+  });
+
+  await t.step("non-safe: arrayBuffer(true) forwards and returns null on re-read", async () => {
+    const inner = _makeFetchyResponse(new Response("data"));
+    await inner.arrayBuffer();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertEquals(await wrapped.arrayBuffer(true), null);
+  });
+
+  await t.step("non-safe: bytes(true) forwards and returns null on re-read", async () => {
+    const inner = _makeFetchyResponse(new Response("data"));
+    await inner.bytes();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertEquals(await wrapped.bytes(true), null);
+  });
+
+  await t.step("non-safe: formData(true) forwards and returns null on re-read", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const inner = _makeFetchyResponse(new Response(fd));
+    await inner.formData();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner));
+    assertEquals(await wrapped.formData(true), null);
+  });
+
+  /* --- safe basics --- */
+  await t.step("safe: await yields the resolved FetchyResponse on success", async () => {
+    const inner = _makeFetchyResponse(new Response("x"));
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner), true);
+    assertStrictEquals(await wrapped, inner);
+  });
+
+  await t.step("safe: await yields null when resolved value is null", async () => {
+    const wrapped = _makeFetchyPromise(Promise.resolve(null), true);
+    assertStrictEquals(await wrapped, null);
+  });
+
+  await t.step("safe: text() returns body on success", async () => {
+    const wrapped = _makeFetchyPromise(fres("hello"), true);
     assertEquals(await wrapped.text(), "hello");
+  });
+
+  await t.step("safe: json() returns parsed value on success", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({ k: "v" })), true);
+    assertEquals(await wrapped.json(), { k: "v" });
+  });
+
+  await t.step("safe: blob() returns Blob on success", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"), true);
+    assertInstanceOf(await wrapped.blob(), Blob);
+  });
+
+  await t.step("safe: arrayBuffer() returns ArrayBuffer on success", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"), true);
+    assertInstanceOf(await wrapped.arrayBuffer(), ArrayBuffer);
+  });
+
+  await t.step("safe: bytes() returns Uint8Array on success", async () => {
+    const wrapped = _makeFetchyPromise(fres("data"), true);
+    assertInstanceOf(await wrapped.bytes(), Uint8Array);
+  });
+
+  await t.step("safe: formData() returns FormData on success", async () => {
+    const fd = new FormData();
+    fd.append("k", "v");
+    const wrapped = _makeFetchyPromise(fres(fd), true);
+    assertInstanceOf(await wrapped.formData(), FormData);
+  });
+
+  /* --- safe error handling --- */
+  await t.step("safe: all methods return null when underlying promise rejects", async () => {
+    const make = () => _makeFetchyPromise(Promise.reject(new Error("fail")), true);
+    assertEquals(await make().text(), null);
+    assertEquals(await make().json(), null);
+    assertEquals(await make().blob(), null);
+    assertEquals(await make().arrayBuffer(), null);
+    assertEquals(await make().bytes(), null);
+    assertEquals(await make().formData(), null);
+  });
+
+  await t.step("safe: all methods return null when resolved with null", async () => {
+    const make = () => _makeFetchyPromise(Promise.resolve(null), true);
+    assertEquals(await make().text(), null);
+    assertEquals(await make().json(), null);
+    assertEquals(await make().blob(), null);
+    assertEquals(await make().arrayBuffer(), null);
+    assertEquals(await make().bytes(), null);
+    assertEquals(await make().formData(), null);
+  });
+
+  await t.step("safe: json() returns null on parse error", async () => {
+    const wrapped = _makeFetchyPromise(fres("not json"), true);
+    assertEquals(await wrapped.json(), null);
+  });
+
+  await t.step("safe: text() returns null when body already consumed", async () => {
+    const inner = _makeFetchyResponse(new Response("hello"));
+    await inner.text();
+    const wrapped = _makeFetchyPromise(Promise.resolve(inner), true);
+    assertEquals(await wrapped.text(), null);
+  });
+
+  await t.step("safe: refine errors are caught and return null", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({})), true);
+    const result = await wrapped.json({
+      refine: () => {
+        throw new Error("bad");
+      },
+    });
+    assertEquals(result, null);
+  });
+
+  await t.step("safe: async refine rejection returns null", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({})), true);
+    const result = await wrapped.json({
+      refine: () => Promise.reject(new Error("bad async")),
+    });
+    assertEquals(result, null);
+  });
+
+  await t.step("safe: reviver and refine options are still applied on success", async () => {
+    const wrapped = _makeFetchyPromise(fres(JSON.stringify({ n: 1 })), true);
+    const result = await wrapped.json<number>({
+      reviver: (_k, v) => typeof v === "number" ? v * 2 : v,
+      refine: (v) => (v as { n: number }).n + 100,
+    });
+    assertEquals(result, 102);
+  });
+
+  await t.step("safe: then chain receives null instead of rejection", async () => {
+    const wrapped = _makeFetchyPromise(Promise.resolve(null), true);
+    const result = await wrapped.then((r) => r);
+    assertStrictEquals(result, null);
   });
 });
 

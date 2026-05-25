@@ -21,6 +21,8 @@ export {
   _isRequest,
   _isString,
   _main,
+  _makeFetchyHeaders,
+  _makeFetchyPromise,
   _makeFetchyResponse,
   _mergeHeaders,
   _mergeSignals,
@@ -36,7 +38,17 @@ export {
   sfetchy,
 };
 
-import type { Fetchy, FetchyBody, FetchyOptions, FetchyResponse, FetchySafeResponse, RetryOptions } from "./types.ts";
+import type {
+  Fetchy,
+  FetchyBody,
+  FetchyHeaders,
+  FetchyOptions,
+  FetchyPromise,
+  FetchyResponse,
+  FetchySafePromise,
+  JSONParseOptions,
+  RetryOptions,
+} from "./types.ts";
 
 /*=============== Constant Values ===============*/
 /** Default configuration values for fetchy. */
@@ -186,8 +198,8 @@ function fy(options?: FetchyOptions): Fetchy {
  * }
  * ```
  */
-function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse {
-  return _makeFetchyResponse(_main(url, options).catch(() => null), true);
+function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafePromise {
+  return _makeFetchyPromise(_main(url, options).catch(() => null), true);
 }
 
 /**
@@ -237,8 +249,8 @@ function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): 
  * });
  * ```
  */
-function fetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-  return _makeFetchyResponse(_main(url, options));
+function fetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchyPromise {
+  return _makeFetchyPromise(_main(url, options));
 }
 
 /**
@@ -268,11 +280,11 @@ function setFetchy(options: FetchyOptions) {
 }
 
 /** Main procedure for fetchy and sfetchy. @internal */
-async function _main(url?: InputArg, options?: FetchyOptions): Promise<Response> {
+async function _main(url?: InputArg, options?: FetchyOptions): Promise<FetchyResponse> {
   options = _buildOption(_baseOption, options);
   const req = _createRequest(options, url);
   const init = _getRequestInit(req, url, options);
-  return await _fetchWithRetry(req, init, _getOptions(req, init, options));
+  return _makeFetchyResponse(await _fetchWithRetry(req, init, _getOptions(req, init, options)));
 }
 
 /*=============== Helper Codes ==================*/
@@ -470,22 +482,56 @@ async function _fetchWithJitter(req: Request, init: RequestInit, options: Option
   await _wait(options.jitter, true);
   return await fetch(req, { ...init, signal: _withTimeout(options) });
 }
+/** Adds parse method to Headers in place. @internal */
+function _makeFetchyHeaders(headers: Headers): FetchyHeaders {
+  return Object.assign(headers, {
+    // deno-lint-ignore no-explicit-any
+    parse<T>(key: string, parser: (v: any) => T, dflt?: T): T {
+      const v = headers.get(key);
+      return v === null && dflt !== undefined ? dflt : parser(v);
+    },
+  }) as FetchyHeaders;
+}
+/** Wraps Response with safe-aware parse methods and FetchyHeaders. @internal */
+function _makeFetchyResponse(res: Response): FetchyResponse {
+  _makeFetchyHeaders(res.headers);
+  // const headers = _makeFetchyHeaders(res.headers);
+  // Object.defineProperty(res, "headers", { value: headers, configurable: true, enumerable: true });
+  const text = res.text.bind(res);
+  // deno-lint-ignore no-explicit-any
+  const ext: Record<string, any> = {
+    json: <T>(opt?: JSONParseOptions<T>) => {
+      const exec = async (): Promise<T> => {
+        const raw: unknown = JSON.parse(await text(), opt?.reviver);
+        return opt?.refine ? await opt.refine(raw) : raw as T;
+      };
+      return opt?.safe ? exec().catch(() => null) : exec();
+    },
+  };
+  for (const m of _METHODS) {
+    if (m === "json") continue;
+    const orig = (res[m] as () => Promise<unknown>).bind(res);
+    ext[m] = (safe?: boolean) => safe ? orig().catch(() => null) : orig();
+  }
+  return Object.assign(res, ext) as FetchyResponse;
+}
 /** Creates promise-like object with convenience parsing methods. @internal */
-function _makeFetchyResponse(res: Promise<Response | null>, safe?: undefined): FetchyResponse;
-function _makeFetchyResponse(res: Promise<Response | null>, safe: true): FetchySafeResponse;
-function _makeFetchyResponse(res: Promise<Response | null>, safe?: boolean): FetchyResponse | FetchySafeResponse {
+function _makeFetchyPromise(res: Promise<FetchyResponse | null>, safe?: undefined): FetchyPromise;
+function _makeFetchyPromise(res: Promise<FetchyResponse | null>, safe: true): FetchySafePromise;
+function _makeFetchyPromise(res: Promise<FetchyResponse | null>, safe?: boolean): FetchyPromise | FetchySafePromise {
   return Object.assign(
     res,
-    Object.fromEntries([
-      ...(
+    Object.fromEntries(
+      _METHODS.map((m) => [
+        m,
         safe
           // deno-lint-ignore no-explicit-any
-          ? _METHODS.map((m) => [m, () => res.then((x: any) => x[m]()).catch(() => null)])
+          ? (...args: any[]) => res.then((x: any) => x[m](...args)).catch(() => null)
           // deno-lint-ignore no-explicit-any
-          : _METHODS.map((m) => [m, () => res.then((x: any) => x[m]())])
-      ),
-    ]),
-  ) as FetchyResponse | FetchySafeResponse;
+          : (...args: any[]) => res.then((x: any) => x[m](...args)),
+      ]),
+    ),
+  ) as unknown as FetchyPromise | FetchySafePromise;
 }
 function _genMethods(obj: object, safe?: boolean) {
   for (const method of _FETCHY) {
