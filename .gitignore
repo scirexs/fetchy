@@ -4,6 +4,7 @@
 /dist
 .wrangler
 *.tgz
+/npm/
 
 # Env
 .env
@@ -29,8 +30,19 @@ node_modules/
 .eslintcache
 .stylelintcache
 
+# Test
+*.sqlite
+
 # VSCode
 .devcontainer/
 .vscode/
 .vscode-test
 
+# Claude
+.claude/
+CLAUDE.md
+
+# Others
+.devconfig/
+.ref/
+/zzz.ts

@@ -48,7 +48,7 @@ await build({
   async postBuild() {
     const main = "./npm/esm/main.js";
     removeInternals(main);
-    replaceInternalName(main);
+    // replaceInternalName(main);
     minify(main);
     Deno.copyFileSync("LICENSE", "npm/LICENSE");
     Deno.copyFileSync("README.md", "npm/README.md");
@@ -75,9 +75,7 @@ function replaceInternalName(path: string) {
     ["zrespects","i"],
     ["znative","j"],
     ["zsignal","k"],
-    ["zurl","l"],
-    ["zbase","m"],
-    ["zbody","n"],
+    ["zbody","l"],
   ];
   let content = Deno.readTextFileSync(path);
   for (const [from, to] of list) {

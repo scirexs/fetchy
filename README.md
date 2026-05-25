@@ -209,6 +209,15 @@ setFetchy({
 await fetchy("https://api.example.com/data");
 ```
 
+**Note:** `setFetchy()` completely replaces previously set global options.
+It does not merge with prior calls. To disable a specific global option,
+call `setFetchy()` again with the desired full configuration.
+
+```ts
+setFetchy({ bearer: "token", timeout: 30 });
+setFetchy({ timeout: 10 });  // bearer is also removed
+```
+
 ## Configuration
 
 ### `FetchyOptions`
@@ -576,6 +585,11 @@ const data = await fetchy("https://api.example.com/rate-limited", {
 }).json();
 // If response has "X-My-Retry-After: 10", will wait 10 seconds before retry
 ```
+
+If the matched header value cannot be parsed as either a number of seconds
+or an HTTP date, fetchy falls back to the configured `interval` value
+(exponential backoff is not applied in this case). If no listed header is
+present in the response, normal exponential backoff is used.
 
 ### Type-Safe API Responses
 ```ts

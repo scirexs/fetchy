@@ -16,18 +16,18 @@ export {
   _getRequestInit,
   _getRetryOption,
   _includeStream,
-  _isBool,
   _isJSONObject,
-  _isNumber,
   _isPlain,
   _isRequest,
   _isString,
   _main,
   _makeFetchyResponse,
+  _mergeHeaders,
   _mergeSignals,
   _parseRetryHeader,
   _shouldRetry,
   _wait,
+  _waitInterval,
   _withTimeout,
   fetchy,
   fy,
@@ -40,7 +40,7 @@ import type { Fetchy, FetchyBody, FetchyOptions, FetchyResponse, FetchySafeRespo
 
 /*=============== Constant Values ===============*/
 /** Default configuration values for fetchy. */
-const _DEFAULT: Options = {
+const _DEFAULT: Omit<Options, "zsignal"> = {
   ztimeout: 15,
   zjitter: 0,
   zinterval: 3,
@@ -48,16 +48,16 @@ const _DEFAULT: Options = {
   zmaxAttempts: 3,
   zonTimeout: true,
   znoIdempotent: false,
-  zstatusCodes: [500, 502, 503, 504, 408, 429],
-  zrespects: ["retry-after", "ratelimit-reset", "x-ratelimit-reset"],
+  zstatusCodes: Object.freeze([500, 502, 503, 504, 408, 429]),
+  zrespects: Object.freeze(["retry-after", "ratelimit-reset", "x-ratelimit-reset"]),
   znative: false,
 } as const;
 /** HTTP methods that do not have idempotency. */
-const _NO_IDEM = ["POST", "PATCH", "CONNECT"];
+const _NO_IDEM: readonly string[] = ["POST", "PATCH", "CONNECT"];
 /** Additional methods for Promise-like interface. */
 const _METHODS = ["text", "json", "bytes", "blob", "arrayBuffer", "formData"] as const;
 /** methods for Fetchy. */
-const _FETCHY = ["fetch", "get", "head", "post", "put", "patch", "delete"];
+const _FETCHY = ["fetch", "get", "head", "post", "put", "patch", "delete"] as const;
 
 /*=============== Internal Types ================*/
 /** Internal normalized options used throughout the fetch process. */
@@ -69,12 +69,10 @@ interface Options {
   zmaxAttempts: number;
   zonTimeout: boolean;
   znoIdempotent: boolean;
-  zstatusCodes: number[];
-  zrespects: string[];
+  zstatusCodes: readonly number[];
+  zrespects: readonly string[];
   znative: boolean;
-  zsignal?: AbortSignal;
-  zurl?: string | URL | Request;
-  zbase?: string | URL;
+  zsignal: AbortSignal;
   zbody?: FetchyBody;
 }
 /** URL argument type for fetchy functions. */
@@ -106,11 +104,11 @@ let _baseOption: FetchyOptions = {};
 class HTTPStatusError extends Error {
   status: number;
   response: Response;
-  constructor(resp: Response) {
-    super(`${resp.status} ${resp.url}`);
+  constructor(res: Response) {
+    super(`${res.status} ${res.url}`);
     this.name = "HTTPStatusError";
-    this.status = resp.status;
-    this.response = resp;
+    this.status = res.status;
+    this.response = res;
   }
 }
 
@@ -189,7 +187,7 @@ function fy(options?: FetchyOptions): Fetchy {
  * ```
  */
 function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchySafeResponse {
-  return _main(url, options, true);
+  return _makeFetchyResponse(_main(url, options).catch(() => null), true);
 }
 
 /**
@@ -240,12 +238,13 @@ function sfetchy(url?: string | URL | Request | null, options?: FetchyOptions): 
  * ```
  */
 function fetchy(url?: string | URL | Request | null, options?: FetchyOptions): FetchyResponse {
-  return _main(url, options);
+  return _makeFetchyResponse(_main(url, options));
 }
 
 /**
  * Sets global default options for all fetchy instances.
- * These options will be merged with instance-specific options, with instance options taking precedence.
+ * Calling this function replaces previously set global options entirely (no merge with prior calls).
+ * The stored options are then merged with per-request options at call time, with per-request options taking precedence.
  *
  * @param options - Default configuration options to apply globally.
  *
@@ -265,35 +264,41 @@ function fetchy(url?: string | URL | Request | null, options?: FetchyOptions): F
  * ```
  */
 function setFetchy(options: FetchyOptions) {
-  _baseOption = options;
+  _baseOption = { ...options };
 }
 
 /** Main procedure for fetchy and sfetchy. @internal */
-function _main(url: InputArg | undefined, options: FetchyOptions | undefined, safe?: undefined): FetchyResponse;
-function _main(url: InputArg | undefined, options: FetchyOptions | undefined, safe: true): FetchySafeResponse;
-function _main(url?: InputArg, options?: FetchyOptions, safe: boolean = false): FetchyResponse | FetchySafeResponse {
+async function _main(url?: InputArg, options?: FetchyOptions): Promise<Response> {
   options = _buildOption(_baseOption, options);
-  const init = _getRequestInit(url, options);
-  const opts = _getOptions(init, url, options);
-  return _makeFetchyResponse(_fetchWithRetry(url, init, opts, safe), safe);
+  const req = _createRequest(options, url);
+  const init = _getRequestInit(req, url, options);
+  return await _fetchWithRetry(req, init, _getOptions(req, init, options));
 }
 
 /*=============== Helper Codes ==================*/
 /** Creates new options object with specified HTTP method and temporal options. @internal */
-function _buildOption(options?: FetchyOptions, temp?: FetchyOptions, method?: string): FetchyOptions {
-  return { ...options, ...temp, ...(method && { method }) };
+function _buildOption(options?: FetchyOptions, req?: FetchyOptions, method?: string): FetchyOptions {
+  const result = { ...options, ...req, ...(method && { method }) };
+  if (_isPlain(options?.retry) && _isPlain(req?.retry)) result.retry = { ...options.retry, ...req.retry };
+  const headers = options?.headers ? new Headers(options.headers) : undefined;
+  if (headers && req?.headers) _mergeHeaders(headers, new Headers(req.headers));
+  result.headers = headers ?? new Headers(req?.headers);
+  return result;
+}
+/** Merges multiple headers into one. @internal */
+function _mergeHeaders(headers: Headers, init: Headers): Headers {
+  init.forEach((v, k) => headers.set(k, v));
+  return headers;
+}
+/** Creates Request object from various input types. @internal */
+function _createRequest(options: FetchyOptions, url?: InputArg): Request {
+  const v = url || (options?.url ?? "");
+  if (_isRequest(v)) return new Request(v);
+  return new Request(URL.parse(v, options?.base) ?? v);
 }
 /** Type guard: checks if value is a string. @internal */
 function _isString(v: unknown): v is string {
   return typeof v === "string";
-}
-/** Type guard: checks if value is a number. @internal */
-function _isNumber(v: unknown): v is number {
-  return typeof v === "number";
-}
-/** Type guard: checks if value is a boolean. @internal */
-function _isBool(v: unknown): v is boolean {
-  return typeof v === "boolean";
 }
 /** Type guard: checks if value is a Request. @internal */
 function _isRequest(v: unknown): v is Request {
@@ -305,14 +310,14 @@ function _isPlain(v: unknown): v is object {
 }
 /** Corrects a number to be non-negative, using default if invalid. @internal */
 function _correctNumber(dflt: number, num?: number): number {
-  return (num ?? -1) >= 0 ? num! : dflt;
+  return (num ?? -1) >= 0 && Number.isFinite(num) ? num! : dflt;
 }
 /** Converts FetchyOptions to standard RequestInit format. @internal */
-function _getRequestInit(url?: InputArg, options?: FetchyOptions): RequestInit {
+function _getRequestInit(req: Request, url?: InputArg, options?: FetchyOptions): RequestInit {
   const { method, body, timeout, retry, bearer, native, jitter, headers, signal, ...rest } = options ?? {};
   return {
-    headers: _getHeaders(options, _isRequest(url) ? url.headers : null),
-    method: method ? method.toUpperCase() : _isRequest(url) ? url.method : body == void 0 ? "GET" : "POST",
+    headers: _getHeaders(_mergeHeaders(req.headers, headers as Headers), options),
+    method: method ?? (_isRequest(url || options?.url) ? req.method : body === undefined ? "GET" : "POST"),
     ..._getBody(body),
     ...rest,
   };
@@ -322,14 +327,13 @@ function _getBody(body?: FetchyBody): Record<string, BodyInit> | null {
   return body instanceof ReadableStream ? null : { body: _isJSONObject(body) ? JSON.stringify(body) : body as BodyInit };
 }
 /** Checks if value should be treated as JSON for serialization. @internal */
-function _isJSONObject(arg?: FetchyBody): boolean {
-  return Boolean(_isNumber(arg) || _isBool(arg) || Array.isArray(arg) || _isPlain(arg));
+function _isJSONObject(v?: FetchyBody): boolean {
+  return Boolean(v === null || typeof v === "number" || typeof v === "boolean" || Array.isArray(v) || _isPlain(v));
 }
 /** Constructs request headers with automatic Content-Type and Authorization. @internal */
-function _getHeaders(options?: FetchyOptions, reqHeaders?: Headers | null): Headers {
-  const headers = new Headers(options?.headers);
-  if (!headers.has("Accept") && !reqHeaders?.has("Accept")) headers.set("Accept", "application/json, text/plain");
-  if (!headers.has("Content-Type") && !reqHeaders?.has("Content-Type")) {
+function _getHeaders(headers: Headers, options?: FetchyOptions): Headers {
+  if (!headers.has("Accept")) headers.set("Accept", "application/json, text/plain");
+  if (!headers.has("Content-Type")) {
     const type = _getContentType(options?.body);
     if (type) headers.set("Content-Type", type);
   }
@@ -339,46 +343,43 @@ function _getHeaders(options?: FetchyOptions, reqHeaders?: Headers | null): Head
 /** Determines Content-Type header based on body type. @internal */
 function _getContentType(body?: FetchyBody): string {
   if (_isJSONObject(body)) return "application/json";
-  return body == void 0 || _isString(body) || body instanceof FormData || body instanceof URLSearchParams ||
+  return body === undefined || _isString(body) || body instanceof FormData || body instanceof URLSearchParams ||
       (body instanceof Blob && !!body.type)
     ? ""
     : "application/octet-stream";
 }
 /** Extracts retry-related options with defaults. @internal */
 function _getRetryOption(init: RequestInit, options?: RetryOptions | false): InternalRetry {
-  if (_isBool(options)) return { ..._DEFAULT, zmaxAttempts: 1 };
+  if (options === false) return { ..._DEFAULT, zmaxAttempts: 1 };
   return {
     zmaxAttempts: Math.max(_correctNumber(_DEFAULT.zmaxAttempts, options?.maxAttempts), 1),
     zinterval: Math.max(_correctNumber(_DEFAULT.zinterval, options?.interval), 0.01),
     zmaxInterval: Math.max(_correctNumber(_DEFAULT.zmaxInterval, options?.maxInterval), 1),
     zonTimeout: options?.retryOnTimeout ?? _DEFAULT.zonTimeout,
-    znoIdempotent: options?.idempotentOnly ? _NO_IDEM.includes(init.method ?? "") : false,
+    znoIdempotent: options?.idempotentOnly ? _NO_IDEM.includes((init.method ?? "").toUpperCase()) : false,
     zstatusCodes: options?.statusCodes ?? _DEFAULT.zstatusCodes,
     zrespects: options?.respectHeaders ?? _DEFAULT.zrespects,
   };
 }
 /** Converts FetchyOptions to internal Options format with validated values. @internal */
-function _getOptions(init: RequestInit, url?: InputArg, options?: FetchyOptions): Options {
+function _getOptions(req: Request, init: RequestInit, options?: FetchyOptions): Options {
   return {
     ..._getRetryOption(init, options?.retry),
     ztimeout: _correctNumber(_DEFAULT.ztimeout, options?.timeout),
     zjitter: _correctNumber(_DEFAULT.zjitter, options?.jitter),
     znative: options?.native ?? _DEFAULT.znative,
-    zsignal: _mergeSignals(_isRequest(url) ? url.signal : null, options?.signal),
-    zurl: options?.url,
-    zbase: options?.base,
+    zsignal: _mergeSignals(req.signal, options?.signal),
     zbody: options?.body,
   };
 }
 /** Merges multiple AbortSignals into one. @internal */
-function _mergeSignals(s1?: AbortSignal | null, s2?: AbortSignal | null): AbortSignal | undefined {
-  if (!s1 && !s2) return;
-  return s1 && s2 ? AbortSignal.any([s1, s2]) : s1 ? s1 : s2 ?? undefined;
+function _mergeSignals(s1: AbortSignal, s2?: AbortSignal | null): AbortSignal {
+  return s2 ? AbortSignal.any([s1, s2]) : s1;
 }
 /** Creates timeout signal and merges with existing signal. @internal */
-function _withTimeout(opts: Options): AbortSignal | undefined {
-  if (opts.ztimeout <= 0) return opts.zsignal;
-  return _mergeSignals(AbortSignal.timeout(opts.ztimeout * 1000), opts.zsignal);
+function _withTimeout(options: Options): AbortSignal {
+  if (options.ztimeout <= 0) return options.zsignal;
+  return _mergeSignals(AbortSignal.timeout(options.ztimeout * 1000), options.zsignal);
 }
 /** Waits for specified seconds with optional randomization. @internal */
 async function _wait(sec: number, random: boolean = false) {
@@ -386,53 +387,51 @@ async function _wait(sec: number, random: boolean = false) {
   const delay = Math.trunc((random ? Math.random() : 1) * sec * 1000);
   await new Promise((resolve) => setTimeout(resolve, delay));
 }
-/** Determines whether to retry based on conditions and waits before next attempt. @internal */
-async function _shouldRetry(count: number, opts: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
-  if (opts.znoIdempotent || count >= opts.zmaxAttempts - 1 || !fn) return false;
-  if (r instanceof Response) {
-    if (opts.znative || !opts.zstatusCodes.includes(r.status)) return false;
-
-    const interval = _getNextInterval(count, opts, r.headers);
-    if (interval > opts.zmaxInterval) return false;
-
-    await _wait(interval);
-    return true;
-  } else {
-    return r instanceof Error && r.name == "TimeoutError" && opts.zonTimeout;
-  }
-}
 /** Calculates next retry interval using exponential backoff or response headers. @internal */
-function _getNextInterval(count: number, opts: Options, headers: Headers): number {
-  return opts.zrespects.some((x) => headers.has(x))
-    ? _findRetryHeader(opts, headers) ?? opts.zinterval
-    : Math.min(opts.zinterval * 2 ** count, opts.zmaxInterval);
+function _getNextInterval(count: number, options: Options, headers?: Headers): number {
+  return options.zrespects.some((x) => headers?.has(x))
+    ? _findRetryHeader(options, headers!) ?? options.zinterval
+    : Math.min(options.zinterval * 2 ** count, options.zmaxInterval);
 }
 /** Finds and parses retry timing from response headers. @internal */
-function _findRetryHeader(opts: Options, headers: Headers): number | undefined {
-  for (const name of opts.zrespects) {
-    const value = _parseRetryHeader(headers.get(name)?.trim());
-    if (!Number.isNaN(value)) return Math.max(value, opts.zinterval);
+function _findRetryHeader(options: Options, headers: Headers): number | undefined {
+  for (const name of options.zrespects) {
+    const value = Math.trunc(_parseRetryHeader(headers.get(name)?.trim()));
+    if (!Number.isNaN(value)) return Math.max(value, options.zinterval);
   }
 }
 /** Parses retry header value to seconds. @internal */
 function _parseRetryHeader(value?: string | null): number {
   if (!value) return NaN;
-  const sec1 = Number.parseInt(value, 10);
-  if (!Number.isNaN(sec1)) return sec1;
-  return Math.ceil((new Date(value).getTime() - Date.now()) / 1000);
+  const sec = Number(value);
+  const now = Date.now() / 1000;
+  if (!Number.isNaN(sec)) return sec > now ? sec - now : sec;
+  return (new Date(value).getTime() / 1000) - now;
+}
+/** Waits for next retry interval unless over max interval. @internal */
+async function _waitInterval(count: number, options: Options, headers?: Headers): Promise<boolean> {
+  const interval = _getNextInterval(count, options, headers);
+  if (interval > options.zmaxInterval) return false;
+  await _wait(interval);
+  return true;
+}
+/** Determines whether to retry based on conditions and waits before next attempt. @internal */
+async function _shouldRetry(count: number, options: Options, r: Response | unknown, fn?: unknown): Promise<boolean> {
+  if (options.znoIdempotent || count >= options.zmaxAttempts - 1 || !fn) return false;
+  if (r instanceof Response) {
+    if (options.znative || !options.zstatusCodes.includes(r.status)) return false;
+
+    return await _waitInterval(count, options, r.headers);
+  } else {
+    if (!(r instanceof Error && r.name == "TimeoutError" && options.zonTimeout)) return false;
+    return await _waitInterval(count, options);
+  }
 }
 /** Creates new Request with ReadableStream body if present in options. @internal */
-function _includeStream(req: Request, opts: Options): Request {
-  if (!(opts.zbody instanceof ReadableStream)) return req;
+function _includeStream(req: Request, options: Options): Request {
+  if (!(options.zbody instanceof ReadableStream)) return req;
   const method = ["GET", "HEAD"].includes(req.method) ? "POST" : req.method;
-  return new Request(req, { method, body: opts.zbody });
-}
-/** Creates Request object from various input types. @internal */
-function _createRequest(opts: Options, url?: InputArg): Request {
-  if (_isRequest(url)) return url;
-  if (!url) url = opts?.zurl ?? "";
-  if (_isRequest(url)) return url;
-  return new Request(URL.parse(url, opts?.zbase) ?? "");
+  return new Request(req, { method, body: options.zbody });
 }
 /** Creates request cloning function with abort handling. @internal */
 function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
@@ -446,41 +445,44 @@ function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
   };
 }
 /** Executes fetch with retry logic and exponential backoff. @internal */
-async function _fetchWithRetry(url: InputArg | undefined, init: RequestInit, opts: Options, safe: boolean): Promise<Response | null> {
+async function _fetchWithRetry(req: Request, init: RequestInit, options: Options): Promise<Response> {
   let creq;
-  for (let i = 0; i < opts.zmaxAttempts; i++) {
+  let cancel = false;
+  for (let i = 0;; i++) {
     try {
-      if (i === 0) creq = _cloneRequestF(_includeStream(_createRequest(opts, url), opts));
-      const resp = await _fetchWithJitter(await creq!(), init, opts);
-      if (await _shouldRetry(i, opts, resp, creq)) continue;
-      if ((resp.status >= 400 || resp.status < 100) && !opts.znative) throw new HTTPStatusError(resp);
-      return resp;
+      if (i === 0) creq = _cloneRequestF(_includeStream(req, options));
+      const res = await _fetchWithJitter(await creq!(), init, options);
+      if (await _shouldRetry(i, options, res, creq)) continue;
+      if ((res.status >= 400 || res.status < 100) && !options.znative) throw new HTTPStatusError(res);
+      cancel = true;
+      return res;
     } catch (e) {
-      if (await _shouldRetry(i, opts, e, creq)) continue;
-      if (safe) return null;
+      if (await _shouldRetry(i, options, e, creq)) continue;
+      cancel = true;
       throw e;
     } finally {
-      await creq?.(true);
+      if (cancel) await creq?.(true);
     }
   }
-  throw new Error();
 }
 /** Executes fetch with initial jitter delay. @internal */
-async function _fetchWithJitter(req: Request, init: RequestInit, opts: Options): Promise<Response> {
-  await _wait(opts.zjitter, true);
-  return await fetch(req, { ...init, signal: _withTimeout(opts) });
+async function _fetchWithJitter(req: Request, init: RequestInit, options: Options): Promise<Response> {
+  await _wait(options.zjitter, true);
+  return await fetch(req, { ...init, signal: _withTimeout(options) });
 }
 /** Creates promise-like object with convenience parsing methods. @internal */
-function _makeFetchyResponse(resp: Promise<Response | null>, safe: boolean): FetchyResponse | FetchySafeResponse {
+function _makeFetchyResponse(res: Promise<Response | null>, safe?: undefined): FetchyResponse;
+function _makeFetchyResponse(res: Promise<Response | null>, safe: true): FetchySafeResponse;
+function _makeFetchyResponse(res: Promise<Response | null>, safe?: boolean): FetchyResponse | FetchySafeResponse {
   return Object.assign(
-    resp,
+    res,
     Object.fromEntries([
       ...(
         safe
           // deno-lint-ignore no-explicit-any
-          ? _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]()).catch(() => null)])
+          ? _METHODS.map((m) => [m, () => res.then((x: any) => x[m]()).catch(() => null)])
           // deno-lint-ignore no-explicit-any
-          : _METHODS.map((m) => [m, () => resp.then((x: any) => x[m]())])
+          : _METHODS.map((m) => [m, () => res.then((x: any) => x[m]())])
       ),
     ]),
   ) as FetchyResponse | FetchySafeResponse;
@@ -488,10 +490,11 @@ function _makeFetchyResponse(resp: Promise<Response | null>, safe: boolean): Fet
 function _genMethods(obj: object, safe?: boolean) {
   for (const method of _FETCHY) {
     const name = (safe ? "s" : "") + method;
-    // deno-lint-ignore no-explicit-any
-    (obj as any)[name] = function (this: Fetchy, url?: InputArg, opts?: FetchyOptions) {
-      const options = method === "fetch" ? _buildOption(this, opts) : _buildOption(this, opts, method);
-      return safe ? sfetchy(url, options) : fetchy(url, options);
-    };
+    Object.defineProperty(obj, name, {
+      value: function (this: Fetchy, url?: InputArg, options?: FetchyOptions) {
+        const result = method === "fetch" ? _buildOption(this, options) : _buildOption(this, options, method);
+        return safe ? sfetchy(url, result) : fetchy(url, result);
+      },
+    });
   }
 }

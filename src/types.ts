@@ -160,17 +160,17 @@ export interface FetchyResponse extends Promise<Response> {
  * ```
  */
 export interface FetchySafeResponse extends Promise<Response | null> {
-  /** Parses response body safety as text. */
+  /** Parses response body safely as text. */
   text: () => Promise<string | null>;
-  /** Parses response body safety as JSON with optional type parameter. */
+  /** Parses response body safely as JSON with optional type parameter. */
   json: <T>() => Promise<T | null>;
-  /** Parses response body safety as Uint8Array. */
+  /** Parses response body safely as Uint8Array. */
   bytes: () => Promise<Uint8Array<ArrayBuffer> | null>;
-  /** Parses response body safety as Blob. */
+  /** Parses response body safely as Blob. */
   blob: () => Promise<Blob | null>;
-  /** Parses response body safety as ArrayBuffer. */
+  /** Parses response body safely as ArrayBuffer. */
   arrayBuffer: () => Promise<ArrayBuffer | null>;
-  /** Parses response body safety as FormData. */
+  /** Parses response body safely as FormData. */
   formData: () => Promise<FormData | null>;
 }
 /**
