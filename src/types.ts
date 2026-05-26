@@ -63,6 +63,11 @@ export interface FetchyOptions extends Omit<RequestInit, "body"> {
    * @default false
    */
   native?: boolean;
+  /**
+   * Custom fetch implementation used in place of the global `fetch`.
+   * @default globalThis.fetch
+   */
+  fetcher?: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 }
 
 /**

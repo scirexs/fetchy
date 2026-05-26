@@ -29,7 +29,6 @@ import {
   _isJSONObject,
   _isPlain,
   _isRequest,
-  _isString,
   _main,
   _makeFetchyHeaders,
   _makeFetchyPromise,
@@ -55,7 +54,7 @@ type AnyOptions = any;
 
 /** Build an Options-shaped object for internal helpers requiring full Options. */
 function makeOptions(overrides: Record<string, unknown> = {}): AnyOptions {
-  return { ..._DEFAULT, signal: new AbortController().signal, ...overrides };
+  return { ..._DEFAULT, fetcher: globalThis.fetch, signal: new AbortController().signal, ...overrides };
 }
 
 /** Build a FetchyOptions with headers always set (invariant after _buildOption). */
@@ -104,23 +103,6 @@ Deno.test("HTTPStatusError", async (t) => {
 });
 
 /*=============== Type Guards ==================*/
-Deno.test("_isString", async (t) => {
-  await t.step("returns true for strings", () => {
-    assertEquals(_isString("hello"), true);
-    assertEquals(_isString(""), true);
-  });
-
-  await t.step("returns false for non-strings", () => {
-    assertEquals(_isString(123), false);
-    assertEquals(_isString(null), false);
-    assertEquals(_isString(undefined), false);
-    assertEquals(_isString({}), false);
-    assertEquals(_isString([]), false);
-    assertEquals(_isString(true), false);
-    assertEquals(_isString(new String("x")), false);
-  });
-});
-
 Deno.test("_isRequest", async (t) => {
   await t.step("returns true for Request instances", () => {
     const req = new Request("https://example.com");
@@ -789,6 +771,42 @@ Deno.test("_getOptions", async (t) => {
     assertEquals(opts.maxAttempts, 5);
     assertEquals(opts.interval, 2);
   });
+
+  await t.step("uses custom fetcher when provided", () => {
+    const custom = () => Promise.resolve(new Response("x"));
+    const opts = _getOptions(req, {}, { fetcher: custom });
+    assertStrictEquals(opts.fetcher, custom);
+  });
+
+  await t.step("falls back to globalThis.fetch when fetcher is not provided", () => {
+    const opts = _getOptions(req, {}, {});
+    assertStrictEquals(opts.fetcher, globalThis.fetch);
+  });
+
+  await t.step("fetcher fallback is resolved lazily at call time (reflects current globalThis.fetch)", () => {
+    const original = globalThis.fetch;
+    const replacement = () => Promise.resolve(new Response("stub"));
+    const mockFetch = stub(globalThis, "fetch", replacement);
+    try {
+      const opts = _getOptions(req, {}, {});
+      // _getOptions resolved fetcher lazily after stub took effect
+      assertStrictEquals(opts.fetcher, globalThis.fetch);
+      assertNotStrictEquals(opts.fetcher, original);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("explicit fetcher wins over globalThis.fetch", () => {
+    const custom = () => Promise.resolve(new Response("custom"));
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("global")));
+    try {
+      const opts = _getOptions(req, {}, { fetcher: custom });
+      assertStrictEquals(opts.fetcher, custom);
+    } finally {
+      mockFetch.restore();
+    }
+  });
 });
 
 /*=============== Signal Handling ==============*/
@@ -1163,6 +1181,49 @@ Deno.test("_fetchWithJitter", async (t) => {
       mockFetch.restore();
     }
   });
+
+  await t.step("invokes options.fetcher with request and init carrying merged signal", async () => {
+    let receivedInput: RequestInfo | URL | undefined;
+    let receivedInit: RequestInit | undefined;
+    const custom = (input: RequestInfo | URL, init?: RequestInit) => {
+      receivedInput = input;
+      receivedInit = init;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const req = new Request("https://example.com");
+      const opts = makeOptions({ jitter: 0, timeout: 5, fetcher: custom });
+      const resp = await _fetchWithJitter(req, { method: "GET" }, opts);
+      assertEquals(resp.status, 200);
+      assertEquals(receivedInput, req);
+      assertExists(receivedInit?.signal);
+      assertEquals(receivedInit?.method, "GET");
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("supports synchronous Response return from fetcher", async () => {
+    const custom = () => new Response("sync", { status: 200 });
+    const opts = makeOptions({ jitter: 0, fetcher: custom });
+    const resp = await _fetchWithJitter(new Request("https://example.com"), {}, opts);
+    assertEquals(resp.status, 200);
+    assertEquals(await resp.text(), "sync");
+  });
+
+  await t.step("propagates errors thrown synchronously from fetcher", async () => {
+    const custom = () => {
+      throw new Error("sync-boom");
+    };
+    const opts = makeOptions({ jitter: 0, fetcher: custom });
+    await assertRejects(
+      () => _fetchWithJitter(new Request("https://example.com"), {}, opts),
+      Error,
+      "sync-boom",
+    );
+  });
 });
 
 Deno.test("_fetchWithRetry", async (t) => {
@@ -1269,6 +1330,37 @@ Deno.test("_fetchWithRetry", async (t) => {
     } finally {
       mockFetch.restore();
     }
+  });
+
+  await t.step("uses options.fetcher and does not call globalThis.fetch", async () => {
+    let calls = 0;
+    const custom = () => {
+      calls++;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const opts = makeOptions({ interval: 0.01, fetcher: custom });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 200);
+      assertEquals(calls, 1);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("reuses same fetcher across retries", async () => {
+    let calls = 0;
+    const custom = () => {
+      calls++;
+      if (calls < 3) return Promise.resolve(new Response("err", { status: 500 }));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const opts = makeOptions({ interval: 0.01, maxInterval: 1, maxAttempts: 5, fetcher: custom });
+    const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+    assertEquals(resp.status, 200);
+    assertEquals(calls, 3);
   });
 });
 
@@ -2233,6 +2325,24 @@ Deno.test("_main", async (t) => {
       mockFetch.restore();
     }
   });
+
+  await t.step("uses options.fetcher when provided (bypasses globalThis.fetch)", async () => {
+    let customCalls = 0;
+    const custom = () => {
+      customCalls++;
+      return Promise.resolve(new Response(JSON.stringify({ via: "custom" }), { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const resp = await _main("https://example.com", { fetcher: custom });
+      assertEquals(resp.status, 200);
+      assertEquals(await resp.json(), { via: "custom" });
+      assertEquals(customCalls, 1);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
 });
 
 /*=============== Public API ===================*/
@@ -2250,6 +2360,47 @@ Deno.test("setFetchy", async (t) => {
     } finally {
       setFetchy({});
       mockFetch.restore();
+    }
+  });
+
+  await t.step("applies globally configured fetcher to subsequent calls", async () => {
+    let customCalls = 0;
+    const custom = () => {
+      customCalls++;
+      return Promise.resolve(new Response("via-global", { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      setFetchy({ fetcher: custom });
+      const resp = await fetchy("https://example.com");
+      assertEquals(await resp.text(), "via-global");
+      assertEquals(customCalls, 1);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      setFetchy({});
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("per-call fetcher overrides setFetchy fetcher", async () => {
+    let globalCalls = 0;
+    let perCallCalls = 0;
+    const globalFetcher = () => {
+      globalCalls++;
+      return Promise.resolve(new Response("global", { status: 200 }));
+    };
+    const perCallFetcher = () => {
+      perCallCalls++;
+      return Promise.resolve(new Response("per-call", { status: 200 }));
+    };
+    try {
+      setFetchy({ fetcher: globalFetcher });
+      const resp = await fetchy("https://example.com", { fetcher: perCallFetcher });
+      assertEquals(await resp.text(), "per-call");
+      assertEquals(globalCalls, 0);
+      assertEquals(perCallCalls, 1);
+    } finally {
+      setFetchy({});
     }
   });
 });
@@ -2296,6 +2447,32 @@ Deno.test("fetchy", async (t) => {
     } finally {
       mockFetch.restore();
     }
+  });
+
+  await t.step("honors fetcher option and forwards Request to it", async () => {
+    let receivedInput: RequestInfo | URL | undefined;
+    const custom = (input: RequestInfo | URL) => {
+      receivedInput = input;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const data = await fetchy("https://example.com/x", { fetcher: custom }).json<{ ok: boolean }>();
+      assertEquals(data, { ok: true });
+      assertInstanceOf(receivedInput, Request);
+      assertEquals((receivedInput as Request).url, "https://example.com/x");
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("HTTPStatusError still thrown when fetcher returns error status", async () => {
+    const custom = () => Promise.resolve(new Response("err", { status: 500 }));
+    await assertRejects(
+      () => fetchy("https://example.com", { fetcher: custom, retry: false }),
+      HTTPStatusError,
+    );
   });
 });
 
@@ -2348,6 +2525,25 @@ Deno.test("sfetchy", async (t) => {
     } finally {
       mockFetch.restore();
     }
+  });
+
+  await t.step("honors fetcher option on success", async () => {
+    const custom = () => Promise.resolve(new Response("ok", { status: 200 }));
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const resp = await sfetchy("https://example.com", { fetcher: custom });
+      assertInstanceOf(resp, Response);
+      assertEquals(await resp!.text(), "ok");
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("returns null when fetcher throws", async () => {
+    const custom = () => Promise.reject(new Error("custom-fail"));
+    const resp = await sfetchy("https://example.com", { fetcher: custom, retry: false });
+    assertEquals(resp, null);
   });
 });
 
@@ -2452,6 +2648,87 @@ Deno.test("fy", async (t) => {
     } finally {
       setFetchy({});
       mockFetch.restore();
+    }
+  });
+
+  await t.step("propagates instance fetcher to all standard methods", async () => {
+    const seen: string[] = [];
+    const custom = (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(String(init?.method));
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const client = fy({ url: "https://example.com", fetcher: custom });
+      await client.get();
+      await client.post();
+      await client.put();
+      await client.patch();
+      await client.delete();
+      await client.head();
+      assertEquals(seen, ["get", "post", "put", "patch", "delete", "head"]);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("propagates instance fetcher to safe methods", async () => {
+    let calls = 0;
+    const custom = () => {
+      calls++;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const client = fy({ url: "https://example.com", fetcher: custom });
+      const r = await client.sget();
+      assertInstanceOf(r, Response);
+      assertEquals(calls, 1);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("per-call fetcher overrides instance fetcher", async () => {
+    let instanceCalls = 0;
+    let perCallCalls = 0;
+    const instanceFetcher = () => {
+      instanceCalls++;
+      return Promise.resolve(new Response("instance", { status: 200 }));
+    };
+    const perCallFetcher = () => {
+      perCallCalls++;
+      return Promise.resolve(new Response("per-call", { status: 200 }));
+    };
+    const client = fy({ url: "https://example.com", fetcher: instanceFetcher });
+    const resp = await client.get(undefined, { fetcher: perCallFetcher });
+    assertEquals(await resp.text(), "per-call");
+    assertEquals(instanceCalls, 0);
+    assertEquals(perCallCalls, 1);
+  });
+
+  await t.step("instance fetcher overrides setFetchy global fetcher", async () => {
+    let globalCalls = 0;
+    let instanceCalls = 0;
+    const globalFetcher = () => {
+      globalCalls++;
+      return Promise.resolve(new Response("global", { status: 200 }));
+    };
+    const instanceFetcher = () => {
+      instanceCalls++;
+      return Promise.resolve(new Response("instance", { status: 200 }));
+    };
+    try {
+      setFetchy({ fetcher: globalFetcher });
+      const client = fy({ url: "https://example.com", fetcher: instanceFetcher });
+      const resp = await client.get();
+      assertEquals(await resp.text(), "instance");
+      assertEquals(globalCalls, 0);
+      assertEquals(instanceCalls, 1);
+    } finally {
+      setFetchy({});
     }
   });
 });

@@ -19,7 +19,6 @@ export {
   _isJSONObject,
   _isPlain,
   _isRequest,
-  _isString,
   _main,
   _makeFetchyHeaders,
   _makeFetchyPromise,
@@ -52,7 +51,7 @@ import type {
 
 /*=============== Constant Values ===============*/
 /** Default configuration values for fetchy. */
-const _DEFAULT: Omit<Options, "signal"> = {
+const _DEFAULT: Omit<Options, "signal" | "fetcher"> = {
   timeout: 15,
   jitter: 0,
   interval: 3,
@@ -86,6 +85,7 @@ interface Options {
   native: boolean;
   signal: AbortSignal;
   body?: FetchyBody;
+  fetcher: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 }
 /** URL argument type for fetchy functions. */
 type InputArg = string | URL | Request | null;
@@ -308,10 +308,6 @@ function _createRequest(options: FetchyOptions, url?: InputArg): Request {
   if (_isRequest(v)) return new Request(v);
   return new Request(URL.parse(v, options?.base) ?? v);
 }
-/** Type guard: checks if value is a string. @internal */
-function _isString(v: unknown): v is string {
-  return typeof v === "string";
-}
 /** Type guard: checks if value is a Request. @internal */
 function _isRequest(v: unknown): v is Request {
   return v instanceof Request;
@@ -355,7 +351,7 @@ function _getHeaders(headers: Headers, options?: FetchyOptions): Headers {
 /** Determines Content-Type header based on body type. @internal */
 function _getContentType(body?: FetchyBody): string {
   if (_isJSONObject(body)) return "application/json";
-  return body === undefined || _isString(body) || body instanceof FormData || body instanceof URLSearchParams ||
+  return body === undefined || typeof body === "string" || body instanceof FormData || body instanceof URLSearchParams ||
       (body instanceof Blob && !!body.type)
     ? ""
     : "application/octet-stream";
@@ -382,6 +378,7 @@ function _getOptions(req: Request, init: RequestInit, options?: FetchyOptions): 
     native: options?.native ?? _DEFAULT.native,
     signal: _mergeSignals(req.signal, options?.signal),
     body: options?.body,
+    fetcher: options?.fetcher ?? fetch,
   };
 }
 /** Merges multiple AbortSignals into one. @internal */
@@ -480,7 +477,7 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
 /** Executes fetch with initial jitter delay. @internal */
 async function _fetchWithJitter(req: Request, init: RequestInit, options: Options): Promise<Response> {
   await _wait(options.jitter, true);
-  return await fetch(req, { ...init, signal: _withTimeout(options) });
+  return await options.fetcher(req, { ...init, signal: _withTimeout(options) });
 }
 /** Adds parse method to Headers in place. @internal */
 function _makeFetchyHeaders(headers: Headers): FetchyHeaders {

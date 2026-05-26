@@ -18,6 +18,7 @@ A lightweight thin fetch wrapper with built-in retry logic, timeout handling, an
 - **Type-Safe** - Full TypeScript support with generic type inference
 - **Bearer Token Helper** - Built-in Authorization header management
 - **Jitter Support** - Prevent thundering herd with randomized delays
+- **Custom Fetcher** - Swap in a custom fetch implementation for environments like Cloudflare Workers
 - **Fluent Interface** - Class-based API with both instance and static methods
 - **HTTP Method Shortcuts** - Convenient methods for GET, POST, PUT, PATCH, DELETE
 - **Per-Call Safe Parsing** - Each body parser accepts an optional `safe` flag to return `null` on failure
@@ -257,6 +258,9 @@ interface FetchyOptions extends Omit<RequestInit, "body"> {
   
   // Use native fetch error behavior (no HTTPStatusError on 4xx/5xx)
   native?: boolean;
+
+  // Custom fetch implementation (default: globalThis.fetch)
+  fetcher?: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 }
 
 interface RetryOptions {
@@ -276,6 +280,7 @@ interface RetryOptions {
   timeout: 15,        // 15 seconds
   jitter: 0,          // No jitter delay
   native: false,      // Throws HTTPStatusError on non-OK status
+  fetcher: globalThis.fetch,  // Uses global fetch by default
   retry: {
     maxAttempts: 3,   // 3 retry attempts
     interval: 3,      // 3 seconds base interval
@@ -625,6 +630,54 @@ const text = await api.get("/readme.txt", {
 ```
 
 ### Advanced Usage
+
+#### Custom Fetch Implementation
+
+Replace the underlying fetch with a custom implementation. Useful for testing,
+applying middleware, or using environment-specific fetch variants such as
+Cloudflare Workers' bound `fetch` for subrequests to services or other Workers.
+
+```ts
+// Testing: swap in a mock fetch
+const mockFetch = (input, init) => {
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { "Content-Type": "application/json" }
+  });
+};
+
+const data = await fetchy("https://api.example.com/data", {
+  fetcher: mockFetch
+}).json();
+
+// Cloudflare Workers: use a service binding's fetch with retry/timeout
+// `env.MY_SERVICE` is bound via wrangler.jsonc
+export default {
+  async fetch(request, env) {
+    return await fetchy("https://my-service/users", {
+      fetcher: env.MY_SERVICE.fetch,
+      retry: { maxAttempts: 3 },
+      timeout: 5
+    });
+  }
+};
+
+// Middleware: wrap fetch to log every request
+const loggingFetch = async (input, init) => {
+  console.log("→", init?.method ?? "GET", input);
+  const res = await fetch(input, init);
+  console.log("←", res.status);
+  return res;
+};
+
+const client = fy({
+  base: "https://api.example.com",
+  fetcher: loggingFetch
+});
+```
+
+**Note:** All fetchy features (retry, timeout, jitter, body serialization, etc.)
+are applied around the custom `fetcher`, so you get fetchy's enhancements even
+when not using the global `fetch`.
 
 #### Jitter for Load Distribution
 ```ts
