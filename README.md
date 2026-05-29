@@ -21,7 +21,7 @@ A lightweight thin fetch wrapper with built-in retry logic, timeout handling, an
 - **Custom Fetcher** - Swap in a custom fetch implementation for environments like Cloudflare Workers
 - **Fluent Interface** - Class-based API with both instance and static methods
 - **HTTP Method Shortcuts** - Convenient methods for GET, POST, PUT, PATCH, DELETE
-- **Per-Call Safe Parsing** - Each body parser accepts an optional `safe` flag to return `null` on failure
+- **Per-Call Safe Parsing** - Each body parser accepts an optional `safe` flag to return `undefined` on parse failure
 - **JSON Refinement** - Optional validator/reviver for type-safe JSON parsing
 - **Typed Header Parsing** - Built-in `parse` helper on `response.headers` for value conversion
 
@@ -55,8 +55,8 @@ const client = fy({
 });
 const posts = await client.get("/posts").json<Post[]>();
 
-// Per-call safe parsing with validation
-const userOrNull = await client.get("/user").json<User>({
+// Per-call safe parsing with validation (returns undefined on parse failure)
+const userOrUndef = await client.get("/user").json<User>({
   safe: true,
   refine: (v) => UserSchema.parse(v)
 });
@@ -78,13 +78,13 @@ Performs an HTTP request with enhanced features. Returns a promise-like object t
 `FetchyPromise` - A promise-like object that extends `Promise<FetchyResponse>` with convenience parsing methods:
 
 - `text()` → `Promise<string>` - Parse response as text
-- `json<T>(options?)` → `Promise<T>` / `Promise<T | null>` - Parse response as JSON (accepts full `JSONParseOptions`: `safe`, `refine`, `reviver`)
+- `json<T>(options?)` → `Promise<T>` / `Promise<T | undefined>` - Parse response as JSON (accepts full `JSONParseOptions`: `safe`, `refine`, `reviver`; returns `undefined` on parse failure when `safe: true`)
 - `bytes()` → `Promise<Uint8Array>` - Parse response as byte array
 - `blob()` → `Promise<Blob>` - Parse response as Blob
 - `arrayBuffer()` → `Promise<ArrayBuffer>` - Parse response as ArrayBuffer
 - `formData()` → `Promise<FormData>` - Parse response as FormData
 
-The awaited result is a `FetchyResponse` (extends `Response`, satisfies `instanceof Response`) whose parse methods additionally accept a `safe` flag to return `null` on failure. See [FetchyResponse](#fetchyresponse) and [FetchyPromise / FetchySafePromise](#fetchypromise--fetchysafepromise) below.
+The awaited result is a `FetchyResponse` (extends `Response`, satisfies `instanceof Response`) whose parse methods additionally accept a `safe` flag to return `undefined` on parse failure. See [FetchyResponse](#fetchyresponse) and [FetchyPromise / FetchySafePromise](#fetchypromise--fetchysafepromise) below.
 
 #### Example
 ```ts
@@ -314,13 +314,26 @@ The following headers are automatically set if not specified:
 
 **Note:** Headers from Request objects are preserved and merged with option headers.
 
+## Failure-Layer Convention
+
+`fetchy` distinguishes failures by the *layer* they originate from and encodes the layer in the return type:
+
+| Layer | How to enter | Failure return value |
+|-------|--------------|----------------------|
+| Request layer (network, HTTP status, timeout, etc.) | `sfetchy(...)` / `FetchySafePromise` methods | `null` |
+| Body-parse layer (`JSON.parse`, `reviver`, `refine`, body already consumed, etc.) | `safe: true` option / `safe` flag on parse methods | `undefined` |
+
+This way the *type* of the failure value tells you where the failure happened. In particular, a legitimate JSON `null` value remains as `null` even with `safe: true` and is distinguishable from a parse failure (`undefined`).
+
+> Note: `sfetchy(...).json()` is the "casual" path and collapses all failure layers into `null` — request failure, parse failure, and a legitimate JSON `null` are all indistinguishable. If you need to separate them, use `fetchy(...).json({ safe: true })` or call `.json({ safe: true })` on the awaited `FetchyResponse`.
+
 ## Response Handling
 
 ### FetchyResponse
 
 The awaited result of `fetchy()` / `sfetchy()`. Extends native `Response` with:
 
-- **Safe-mode parse methods** - Each body parser accepts an optional `safe` flag to return `null` on failure
+- **Safe-mode parse methods** - Each body parser accepts an optional `safe` flag to return `undefined` on parse failure
 - **JSON options** - `json()` accepts `{ refine, reviver, safe }` for validated/transformed parsing
 - **Extended headers** - `response.headers` is `FetchyHeaders` with a typed `parse` method
 
@@ -334,9 +347,9 @@ const res = await fetchy("https://api.example.com/data");
 const user = await res.json<User>();
 const text = await res.text();
 
-// Safe - returns null on parse error
-const userOrNull = await res.json<User>({ safe: true });
-const textOrNull = await res.text(true);
+// Safe - returns undefined on parse error (distinct from legitimate JSON null)
+const userOrUndef = await res.json<User>({ safe: true });
+const textOrUndef = await res.text(true);
 
 // JSON with validation (throws if UserSchema.parse fails)
 const validated = await res.json<User>({
@@ -348,7 +361,7 @@ const withDates = await res.json<Post>({
   reviver: (_, v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? new Date(v) : v
 });
 
-// Combined: safe + refine (returns null if validation fails)
+// Combined: safe + refine (returns undefined if validation fails)
 const safeValidated = await res.json<User>({
   safe: true,
   refine: (v) => UserSchema.parse(v)
@@ -371,7 +384,8 @@ const date = res.headers.parse("date", (v) => v ? new Date(v) : null);
 #### `JSONParseOptions`
 ```ts
 interface JSONParseOptions<T> {
-  // If true, returns null instead of throwing on parse, reviver, or refine errors (default: false)
+  // If true, returns undefined instead of throwing on parse, reviver, or refine errors (default: false)
+  // A legitimate JSON `null` value is preserved as-is and remains distinguishable from a parse failure.
   safe?: boolean;
 
   // Validates or transforms the parsed value
@@ -391,32 +405,41 @@ The promise-like objects returned by `fetchy()` and `sfetchy()`. They forward pa
 Accepts the full `JSONParseOptions<T>` (same as `FetchyResponse.json`). The return type narrows based on `safe`:
 
 ```ts
-const user = await fetchy(url).json<User>();                       // Promise<User>
-const user = await fetchy(url).json<User>({ refine });             // Promise<User>
-const userOrNull = await fetchy(url).json<User>({ safe: true });   // Promise<User | null>
+const user = await fetchy(url).json<User>();                        // Promise<User>
+const user = await fetchy(url).json<User>({ refine });              // Promise<User>
+const userOrUndef = await fetchy(url).json<User>({ safe: true });   // Promise<User | undefined>
 ```
+
+Note: only parse-layer failures become `undefined`. Request-layer failures (network/HTTP errors) still reject — use `sfetchy(...)` or wrap in `try/catch` for that.
 
 #### `FetchySafePromise.json`
 
-Always operates in safe mode — `safe` cannot be specified and all parse/refine errors are caught and converted to `null`. The option type is `Omit<JSONParseOptions<T>, "safe">`:
+Always operates in safe mode — `safe` cannot be specified and all errors (request *and* parse) are collapsed to `null`. The option type is `Omit<JSONParseOptions<T>, "safe">`:
 
 ```ts
 const user = await sfetchy(url).json<User>();           // Promise<User | null>
 const user = await sfetchy(url).json<User>({ refine }); // Promise<User | null>
 ```
 
+Because all failure layers collapse to `null` here, a legitimate JSON `null` value, a parse failure, and a request failure are *not* distinguishable. If you need to tell them apart, see "Safe Fetch with Strict Parse" below.
+
 #### Safe Fetch with Strict Parse
 
-If you want safe handling for the fetch itself (network/HTTP errors → `null`) but strict behavior on body parsing (throw on parse failure), `await` the response first and call `json()` on the resolved `FetchyResponse` instead of chaining directly:
+If you want safe handling for the fetch itself (network/HTTP errors → `null`) but strict (or layer-distinguishable) behavior on body parsing, `await` the response first and call `json()` on the resolved `FetchyResponse` instead of chaining directly:
 
 ```ts
-// Direct chain: parse errors are silenced as null
+// Direct chain: every failure collapses to null
 const data = await sfetchy(url).json<User>();
 
 // Two-step alternative: parse errors are thrown
 const res = await sfetchy(url);
-if (res === null) return;            // handle fetch failure
+if (res === null) return;             // request-layer failure
 const data = await res.json<User>();  // throws on parse error
+
+// Two-step + safe: distinguishes layers
+const res2 = await sfetchy(url);
+if (res2 === null) return;                            // request-layer failure
+const data2 = await res2.json<User>({ safe: true });  // undefined on parse failure, null preserved
 ```
 
 ## Error Handling

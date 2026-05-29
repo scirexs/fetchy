@@ -1549,10 +1549,10 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.text(false));
   });
 
-  await t.step("text(true) returns null when body cannot be read", async () => {
+  await t.step("text(true) returns undefined when body cannot be read", async () => {
     const fres = _makeFetchyResponse(new Response("hello"));
     await fres.text();
-    assertEquals(await fres.text(true), null);
+    assertEquals(await fres.text(true), undefined);
   });
 
   /* --- json() --- */
@@ -1572,9 +1572,9 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.json());
   });
 
-  await t.step("json({safe: true}) returns null on parse error", async () => {
+  await t.step("json({safe: true}) returns undefined on parse error", async () => {
     const fres = _makeFetchyResponse(new Response("not json"));
-    assertEquals(await fres.json({ safe: true }), null);
+    assertEquals(await fres.json({ safe: true }), undefined);
   });
 
   await t.step("json({safe: false}) rejects on parse error", async () => {
@@ -1622,7 +1622,7 @@ Deno.test("_makeFetchyResponse", async (t) => {
     );
   });
 
-  await t.step("json({refine, safe: true}) returns null when refine throws", async () => {
+  await t.step("json({refine, safe: true}) returns undefined when refine throws", async () => {
     const fres = _makeFetchyResponse(new Response(JSON.stringify({})));
     const result = await fres.json({
       safe: true,
@@ -1630,16 +1630,16 @@ Deno.test("_makeFetchyResponse", async (t) => {
         throw new Error("invalid");
       },
     });
-    assertEquals(result, null);
+    assertEquals(result, undefined);
   });
 
-  await t.step("json({refine, safe: true}) returns null when async refine rejects", async () => {
+  await t.step("json({refine, safe: true}) returns undefined when async refine rejects", async () => {
     const fres = _makeFetchyResponse(new Response(JSON.stringify({})));
     const result = await fres.json({
       safe: true,
       refine: () => Promise.reject(new Error("async invalid")),
     });
-    assertEquals(result, null);
+    assertEquals(result, undefined);
   });
 
   await t.step("json({reviver, refine}) chains reviver then refine", async () => {
@@ -1651,10 +1651,10 @@ Deno.test("_makeFetchyResponse", async (t) => {
     assertEquals(result, 102);
   });
 
-  await t.step("json({safe: true}) returns null when body cannot be read", async () => {
+  await t.step("json({safe: true}) returns undefined when body cannot be read", async () => {
     const fres = _makeFetchyResponse(new Response("{}"));
     await fres.text();
-    assertEquals(await fres.json({ safe: true }), null);
+    assertEquals(await fres.json({ safe: true }), undefined);
   });
 
   /* --- blob() --- */
@@ -1669,10 +1669,10 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.blob());
   });
 
-  await t.step("blob(true) returns null when body already consumed", async () => {
+  await t.step("blob(true) returns undefined when body already consumed", async () => {
     const fres = _makeFetchyResponse(new Response("data"));
     await fres.blob();
-    assertEquals(await fres.blob(true), null);
+    assertEquals(await fres.blob(true), undefined);
   });
 
   /* --- arrayBuffer() --- */
@@ -1687,10 +1687,10 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.arrayBuffer());
   });
 
-  await t.step("arrayBuffer(true) returns null when body already consumed", async () => {
+  await t.step("arrayBuffer(true) returns undefined when body already consumed", async () => {
     const fres = _makeFetchyResponse(new Response("data"));
     await fres.arrayBuffer();
-    assertEquals(await fres.arrayBuffer(true), null);
+    assertEquals(await fres.arrayBuffer(true), undefined);
   });
 
   /* --- bytes() --- */
@@ -1705,10 +1705,10 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.bytes());
   });
 
-  await t.step("bytes(true) returns null when body already consumed", async () => {
+  await t.step("bytes(true) returns undefined when body already consumed", async () => {
     const fres = _makeFetchyResponse(new Response("data"));
     await fres.bytes();
-    assertEquals(await fres.bytes(true), null);
+    assertEquals(await fres.bytes(true), undefined);
   });
 
   /* --- formData() --- */
@@ -1729,12 +1729,12 @@ Deno.test("_makeFetchyResponse", async (t) => {
     await assertRejects(() => fres.formData());
   });
 
-  await t.step("formData(true) returns null when body already consumed", async () => {
+  await t.step("formData(true) returns undefined when body already consumed", async () => {
     const fd = new FormData();
     fd.append("k", "v");
     const fres = _makeFetchyResponse(new Response(fd));
     await fres.formData();
-    assertEquals(await fres.formData(true), null);
+    assertEquals(await fres.formData(true), undefined);
   });
 });
 
@@ -1816,11 +1816,11 @@ Deno.test("_makeFetchyPromise", async (t) => {
   });
 
   /* --- non-safe arg forwarding (delegates to FetchyResponse) --- */
-  await t.step("non-safe: text(true) forwards to FetchyResponse and returns null on body re-read", async () => {
+  await t.step("non-safe: text(true) forwards to FetchyResponse and returns undefined on body re-read", async () => {
     const inner = _makeFetchyResponse(new Response("hello"));
     await inner.text();
     const wrapped = _makeFetchyPromise(Promise.resolve(inner));
-    assertEquals(await wrapped.text(true), null);
+    assertEquals(await wrapped.text(true), undefined);
   });
 
   await t.step("non-safe: text(false) forwards to FetchyResponse and rejects on body re-read", async () => {
@@ -1830,9 +1830,9 @@ Deno.test("_makeFetchyPromise", async (t) => {
     await assertRejects(() => wrapped.text(false));
   });
 
-  await t.step("non-safe: json({safe: true}) forwards and returns null on parse error", async () => {
+  await t.step("non-safe: json({safe: true}) forwards and returns undefined on parse error", async () => {
     const wrapped = _makeFetchyPromise(fres("not json"));
-    assertEquals(await wrapped.json({ safe: true }), null);
+    assertEquals(await wrapped.json({ safe: true }), undefined);
   });
 
   await t.step("non-safe: json({reviver, refine}) options are forwarded", async () => {
@@ -1844,34 +1844,34 @@ Deno.test("_makeFetchyPromise", async (t) => {
     assertEquals(result, 102);
   });
 
-  await t.step("non-safe: blob(true) forwards and returns null on re-read", async () => {
+  await t.step("non-safe: blob(true) forwards and returns undefined on re-read", async () => {
     const inner = _makeFetchyResponse(new Response("data"));
     await inner.blob();
     const wrapped = _makeFetchyPromise(Promise.resolve(inner));
-    assertEquals(await wrapped.blob(true), null);
+    assertEquals(await wrapped.blob(true), undefined);
   });
 
-  await t.step("non-safe: arrayBuffer(true) forwards and returns null on re-read", async () => {
+  await t.step("non-safe: arrayBuffer(true) forwards and returns undefined on re-read", async () => {
     const inner = _makeFetchyResponse(new Response("data"));
     await inner.arrayBuffer();
     const wrapped = _makeFetchyPromise(Promise.resolve(inner));
-    assertEquals(await wrapped.arrayBuffer(true), null);
+    assertEquals(await wrapped.arrayBuffer(true), undefined);
   });
 
-  await t.step("non-safe: bytes(true) forwards and returns null on re-read", async () => {
+  await t.step("non-safe: bytes(true) forwards and returns undefined on re-read", async () => {
     const inner = _makeFetchyResponse(new Response("data"));
     await inner.bytes();
     const wrapped = _makeFetchyPromise(Promise.resolve(inner));
-    assertEquals(await wrapped.bytes(true), null);
+    assertEquals(await wrapped.bytes(true), undefined);
   });
 
-  await t.step("non-safe: formData(true) forwards and returns null on re-read", async () => {
+  await t.step("non-safe: formData(true) forwards and returns undefined on re-read", async () => {
     const fd = new FormData();
     fd.append("k", "v");
     const inner = _makeFetchyResponse(new Response(fd));
     await inner.formData();
     const wrapped = _makeFetchyPromise(Promise.resolve(inner));
-    assertEquals(await wrapped.formData(true), null);
+    assertEquals(await wrapped.formData(true), undefined);
   });
 
   /* --- safe basics --- */

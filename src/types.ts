@@ -136,7 +136,8 @@ export interface RetryOptions {
  */
 export interface JSONParseOptions<T> {
   /**
-   * If true, returns `null` instead of throwing on parse, reviver, or refine errors.
+   * If true, returns `undefined` instead of throwing on parse, reviver, or refine errors.
+   * This is distinct from a legitimate JSON `null` value, which is preserved as-is.
    * @default false
    */
   safe?: boolean;
@@ -171,9 +172,13 @@ export interface FetchyHeaders extends Headers {
 
 /**
  * Extended `Response` returned by `fetchy` / `sfetchy` after awaiting.
- * Adds an optional `safe` flag to body parsing methods (returns `null` on failure instead of throwing)
+ * Adds an optional `safe` flag to body parsing methods (returns `undefined` on failure instead of throwing)
  * and replaces `headers` with `FetchyHeaders`.
  * Still satisfies `instanceof Response`.
+ *
+ * The return-type convention encodes the failure layer:
+ * - `undefined` indicates a body-parse layer failure (only when `safe: true` is specified).
+ * - `null` is reserved for the request layer (see `FetchySafePromise`).
  *
  * @example
  * ```ts
@@ -183,9 +188,9 @@ export interface FetchyHeaders extends Headers {
  * const user = await res.json<User>();
  * const text = await res.text();
  *
- * // Safe parsing (returns null on error)
- * const userOrNull = await res.json<User>({ safe: true });
- * const textOrNull = await res.text(true);
+ * // Safe parsing (returns undefined on error)
+ * const userOrUndef = await res.json<User>({ safe: true });
+ * const textOrUndef = await res.text(true);
  *
  * // JSON with validation and reviver
  * const validated = await res.json<User>({ refine: (v) => UserSchema.parse(v) });
@@ -195,22 +200,22 @@ export interface FetchyResponse extends Response {
   readonly headers: FetchyHeaders;
   /** Parses response body as text. */
   text(safe?: false): Promise<string>;
-  text(safe: boolean): Promise<string | null>;
+  text(safe: boolean): Promise<string | undefined>;
   /** Parses response body as JSON with optional type parameter. */
   json<T>(options?: JSONParseOptions<T> & { safe?: false }): Promise<T>;
-  json<T>(options: JSONParseOptions<T>): Promise<T | null>;
+  json<T>(options: JSONParseOptions<T>): Promise<T | undefined>;
   /** Parses response body as Uint8Array. */
   bytes(safe?: false): Promise<Uint8Array<ArrayBuffer>>;
-  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | null>;
+  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** Parses response body as Blob. */
   blob(safe?: false): Promise<Blob>;
-  blob(safe: boolean): Promise<Blob | null>;
+  blob(safe: boolean): Promise<Blob | undefined>;
   /** Parses response body as ArrayBuffer. */
   arrayBuffer(safe?: false): Promise<ArrayBuffer>;
-  arrayBuffer(safe: boolean): Promise<ArrayBuffer | null>;
+  arrayBuffer(safe: boolean): Promise<ArrayBuffer | undefined>;
   /** Parses response body as FormData. */
   formData(safe?: false): Promise<FormData>;
-  formData(safe: boolean): Promise<FormData | null>;
+  formData(safe: boolean): Promise<FormData | undefined>;
 }
 
 /**
@@ -232,28 +237,33 @@ export interface FetchyResponse extends Response {
 export interface FetchyPromise extends Promise<FetchyResponse> {
   /** Parses response body as text. */
   text(safe?: false): Promise<string>;
-  text(safe: boolean): Promise<string | null>;
+  text(safe: boolean): Promise<string | undefined>;
   /** Parses response body as JSON with optional type parameter. */
   json<T>(options?: JSONParseOptions<T> & { safe?: false }): Promise<T>;
-  json<T>(options: JSONParseOptions<T>): Promise<T | null>;
+  json<T>(options: JSONParseOptions<T>): Promise<T | undefined>;
   /** Parses response body as Uint8Array. */
   bytes(safe?: false): Promise<Uint8Array<ArrayBuffer>>;
-  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | null>;
+  bytes(safe: boolean): Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** Parses response body as Blob. */
   blob(safe?: false): Promise<Blob>;
-  blob(safe: boolean): Promise<Blob | null>;
+  blob(safe: boolean): Promise<Blob | undefined>;
   /** Parses response body as ArrayBuffer. */
   arrayBuffer(safe?: false): Promise<ArrayBuffer>;
-  arrayBuffer(safe: boolean): Promise<ArrayBuffer | null>;
+  arrayBuffer(safe: boolean): Promise<ArrayBuffer | undefined>;
   /** Parses response body as FormData. */
   formData(safe?: false): Promise<FormData>;
-  formData(safe: boolean): Promise<FormData | null>;
+  formData(safe: boolean): Promise<FormData | undefined>;
 }
 
 /**
  * Promise-like response object for safe mode that extends `Promise<FetchyResponse | null>`.
- * Returns null instead of throwing errors on request failure.
+ * Returns `null` instead of throwing on any failure (request or parse).
  * Provides the same convenience methods as FetchyPromise.
+ *
+ * Note: `sfetchy` is the "casual" path that collapses all failure layers into `null`.
+ * If you need to distinguish a body-parse failure from a legitimate JSON `null` value,
+ * use `fetchy(...)` (or await `sfetchy(...)`) and call `.json({ safe: true })` on the
+ * resolved `FetchyResponse` — that returns `undefined` only on parse failures.
  *
  * @example
  * ```ts

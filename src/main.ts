@@ -502,13 +502,13 @@ function _makeFetchyResponse(res: Response): FetchyResponse {
         const raw: unknown = JSON.parse(await text(), opt?.reviver);
         return opt?.refine ? await opt.refine(raw) : raw as T;
       };
-      return opt?.safe ? exec().catch(() => null) : exec();
+      return opt?.safe ? exec().catch(() => undefined) : exec();
     },
   };
   for (const m of _METHODS) {
     if (m === "json") continue;
     const orig = (res[m] as () => Promise<unknown>).bind(res);
-    ext[m] = (safe?: boolean) => safe ? orig().catch(() => null) : orig();
+    ext[m] = (safe?: boolean) => safe ? orig().catch(() => undefined) : orig();
   }
   return Object.assign(res, ext) as FetchyResponse;
 }
