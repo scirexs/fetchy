@@ -2,7 +2,7 @@
  * Represents a JSON-compatible value that can be serialized and deserialized.
  * This type includes primitives, arrays, and plain objects with string keys.
  */
-export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue | undefined };
 
 /**
  * Represents the body content that can be sent in a fetch request.

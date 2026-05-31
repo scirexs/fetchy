@@ -312,6 +312,8 @@ The following headers are automatically set if not specified:
   - `Blob` without type, `ArrayBuffer`: `application/octet-stream`
 - **Authorization**: `Bearer ${options.bearer}` if bearer is provided
 
+**Note:** Object properties in a JSON body may be `undefined`, so you can spread possibly-absent values directly (e.g. `{ optional }` where `optional` is `string | undefined`). Such properties are dropped by `JSON.stringify`, matching native JSON serialization. `undefined` is only allowed as an object property value, not as a top-level body or array element.
+
 **Note:** Headers from Request objects are preserved and merged with option headers.
 
 ## Failure-Layer Convention
