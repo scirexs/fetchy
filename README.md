@@ -507,6 +507,11 @@ if (!response.ok) {
 }
 ```
 
+**Note:** `native` only changes status-code error handling. Retry (including
+retries on `retry.statusCodes`), `timeout`, and `jitter` still apply; when
+retries are exhausted the last response is returned as-is. To disable those too,
+set `retry: false` and `timeout: 0`.
+
 ## Compatibility with Native Fetch
 
 Designed for easy migration back to native `fetch` if needed, minimizing maintenance risk.

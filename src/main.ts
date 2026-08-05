@@ -428,8 +428,7 @@ async function _waitInterval(count: number, options: Options, headers?: Headers)
 async function _shouldRetry(count: number, options: Options, r: Response | unknown): Promise<boolean> {
   if (options.noIdempotent || count >= options.maxAttempts - 1) return false;
   if (r instanceof Response) {
-    if (options.native || !options.statusCodes.includes(r.status)) return false;
-
+    if (!options.statusCodes.includes(r.status)) return false;
     return await _waitInterval(count, options, r.headers);
   } else {
     if (!(r instanceof Error && r.name == "TimeoutError" && options.onTimeout)) return false;

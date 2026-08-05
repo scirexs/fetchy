@@ -59,7 +59,8 @@ export interface FetchyOptions extends Omit<RequestInit, "body"> {
    */
   jitter?: number;
   /**
-   * If true, does not throw error on HTTP error status, behaving like native fetch.
+   * If true, does not throw error on HTTP error status and returns the response as-is.
+   * Only status error handling is affected; retry, timeout and jitter still apply.
    * @default false
    */
   native?: boolean;

@@ -150,8 +150,13 @@ because the dnt build leaves the working tree dirty.
 
 ## Key Decisions
 
-No ADRs exist under `.ws/decision/` yet. Until they do, the design intent lives
-in `README.md`:
+ADRs under `.ws/decision/`:
+
+- `001-native-scope-response-handling-only.md` — `native` controls only whether a
+  non-OK status throws `HTTPStatusError`; it never disables retry, timeout, or
+  jitter.
+
+Further design intent lives in `README.md`:
 
 - "Failure-Layer Convention" — why `null` and `undefined` mean different things.
 - "Compatibility with Native Fetch" — the removability constraint that keeps the

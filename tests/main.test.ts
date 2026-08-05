@@ -1048,10 +1048,10 @@ Deno.test("_shouldRetry", async (t) => {
     assertEquals(await _shouldRetry(2, opts, resp), false);
   });
 
-  await t.step("returns false in native mode for retryable status", async () => {
-    const opts = makeOptions({ native: true });
+  await t.step("returns true in native mode for retryable status", async () => {
+    const opts = makeOptions({ native: true, interval: 0.01, maxInterval: 1 });
     const resp = new Response("error", { status: 500 });
-    assertEquals(await _shouldRetry(0, opts, resp), false);
+    assertEquals(await _shouldRetry(0, opts, resp), true);
   });
 
   await t.step("returns false when status is not in statusCodes", async () => {
@@ -1309,6 +1309,34 @@ Deno.test("_fetchWithRetry", async (t) => {
       const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
       assertEquals(resp.status, 200);
       assertEquals(attempts, 2);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("retries a retryable status in native mode and returns the last response", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("err", { status: 503 })));
+    try {
+      const opts = makeOptions({ native: true, interval: 0.01, maxInterval: 1, maxAttempts: 3 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 503);
+      assertSpyCalls(mockFetch, 3);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("recovers in native mode after a retryable status", async () => {
+    let attempts = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      attempts++;
+      return Promise.resolve(new Response(attempts === 1 ? "err" : "ok", { status: attempts === 1 ? 503 : 200 }));
+    });
+    try {
+      const opts = makeOptions({ native: true, interval: 0.01, maxInterval: 1, maxAttempts: 3 });
+      const resp = await _fetchWithRetry(new Request("https://example.com"), {}, opts);
+      assertEquals(resp.status, 200);
+      assertSpyCalls(mockFetch, 2);
     } finally {
       mockFetch.restore();
     }
@@ -2255,6 +2283,24 @@ Deno.test("_main", async (t) => {
       const resp = await _main("https://example.com", { retry: { maxAttempts: 3, interval: 0.01 } });
       assertEquals(resp.status, 200);
       assertEquals(attempts, 2);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("retries on retryable status in native mode", async () => {
+    let attempts = 0;
+    const mockFetch = stub(globalThis, "fetch", () => {
+      attempts++;
+      return Promise.resolve(new Response(attempts === 1 ? "err" : "ok", { status: attempts === 1 ? 503 : 200 }));
+    });
+    try {
+      const resp = await _main("https://example.com", {
+        native: true,
+        retry: { maxAttempts: 3, interval: 0.01, maxInterval: 1 },
+      });
+      assertEquals(resp.status, 200);
+      assertSpyCalls(mockFetch, 2);
     } finally {
       mockFetch.restore();
     }
