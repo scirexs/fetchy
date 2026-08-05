@@ -222,8 +222,7 @@ await fetchy("https://api.example.com/data");
 ```
 
 **Note:** `setFetchy()` completely replaces previously set global options.
-It does not merge with prior calls. To disable a specific global option,
-call `setFetchy()` again with the desired full configuration.
+It does not merge with prior calls. To disable a specific global option, call `setFetchy()` again with the desired full configuration.
 
 ```ts
 setFetchy({ bearer: "token", timeout: 30 });
@@ -507,10 +506,7 @@ if (!response.ok) {
 }
 ```
 
-**Note:** `native` only changes status-code error handling. Retry (including
-retries on `retry.statusCodes`), `timeout`, and `jitter` still apply; when
-retries are exhausted the last response is returned as-is. To disable those too,
-set `retry: false` and `timeout: 0`.
+**Note:** `native` only changes status-code error handling. Retry (including retries on `retry.statusCodes`), `timeout`, and `jitter` still apply; when retries are exhausted the last response is returned as-is. To disable those too, set `retry: false` and `timeout: 0`.
 
 ## Compatibility with Native Fetch
 
@@ -705,9 +701,7 @@ const client = fy({
 });
 ```
 
-**Note:** All fetchy features (retry, timeout, jitter, body serialization, etc.)
-are applied around the custom `fetcher`, so you get fetchy's enhancements even
-when not using the global `fetch`.
+**Note:** All fetchy features (retry, timeout, jitter, body serialization, etc.) are applied around the custom `fetcher`, so you get fetchy's enhancements even when not using the global `fetch`.
 
 #### Jitter for Load Distribution
 ```ts
