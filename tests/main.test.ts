@@ -513,13 +513,17 @@ Deno.test("_getRequestInit", async (t) => {
 
   await t.step("strips fetchy-specific options", () => {
     const req = new Request("https://example.com");
-    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({
-      timeout: 10,
-      retry: false,
-      bearer: "token",
-      native: true,
-      jitter: 1,
-    }));
+    const init = _getRequestInit(
+      req,
+      "https://example.com",
+      makeFetchyOptions({
+        timeout: 10,
+        retry: false,
+        bearer: "token",
+        native: true,
+        jitter: 1,
+      }),
+    );
     assertEquals("timeout" in init, false);
     assertEquals("retry" in init, false);
     assertEquals("bearer" in init, false);
@@ -536,12 +540,16 @@ Deno.test("_getRequestInit", async (t) => {
 
   await t.step("preserves standard RequestInit properties via rest spread", () => {
     const req = new Request("https://example.com");
-    const init = _getRequestInit(req, "https://example.com", makeFetchyOptions({
-      cache: "no-cache",
-      credentials: "include",
-      mode: "cors",
-      redirect: "manual",
-    }));
+    const init = _getRequestInit(
+      req,
+      "https://example.com",
+      makeFetchyOptions({
+        cache: "no-cache",
+        credentials: "include",
+        mode: "cors",
+        redirect: "manual",
+      }),
+    );
     assertEquals(init.cache, "no-cache");
     assertEquals(init.credentials, "include");
     assertEquals(init.mode, "cors");
