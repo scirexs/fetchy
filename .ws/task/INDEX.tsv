@@ -1,2 +1,3 @@
 # <task_id>	<type>: <description>
 20260805_x2wrsz	fix: Stop native:true from suppressing status-code retry; scope the native option to response handling only (ADR 001)
+20260816_zzch7m	ci: リリースワークフローの publish 先に GitHub Packages を追加(jsr → npm → GitHub Packages)

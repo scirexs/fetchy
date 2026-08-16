@@ -22,8 +22,8 @@ update trigger stays unambiguous.
 
 A lightweight, zero-dependency thin wrapper around the platform `fetch`, adding
 timeout, retry with exponential backoff, automatic body/header handling, and
-chainable body parsing. Published to both JSR and npm and runs on Deno, Node.js,
-and modern browsers.
+chainable body parsing. Published to JSR, npm, and GitHub Packages and runs on
+Deno, Node.js, and modern browsers.
 
 ## Purpose
 
@@ -94,7 +94,7 @@ it to the `main.ts` export list, not to `mod.ts`.
 ```
 src/            library source (the published unit)
 tests/          Deno unit tests
-.github/workflows/  release.yaml — publishes to JSR then npm on push to main
+.github/workflows/  release.yaml — publishes to JSR, npm, then GitHub Packages on push to main
 npm/            (generated) dnt output, gitignored
 node_modules/   (generated) gitignored
 .ws/            workspace documentation (this file's home)
@@ -145,8 +145,9 @@ deno run -A ./build_npm.ts   # full npm build → ./npm (generated); only when t
 
 `deno task test` is an alias for `deno test`. Release is automated: pushing to
 `main` runs `.github/workflows/release.yaml`, which publishes to JSR first
-(`deno publish`) and then builds and publishes to npm — JSR must go first
-because the dnt build leaves the working tree dirty.
+(`deno publish`), then builds and publishes to npm, and finally publishes the
+same dnt output to GitHub Packages — JSR must go first because the dnt build
+leaves the working tree dirty.
 
 ## Key Decisions
 
