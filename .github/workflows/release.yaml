@@ -38,8 +38,7 @@ jobs:
         run: npm publish --provenance
         working-directory: ./npm
 
-      # GitHub Packages: private repositories route the whole @scirexs scope
-      # here, and its npm registry does not accept --provenance.
+      # For private repositories route the whole @scirexs scope; its npm registry does not accept --provenance.
       - name: Switch registry to GitHub Packages
         uses: actions/setup-node@v4
         with:
