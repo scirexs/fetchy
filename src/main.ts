@@ -58,6 +58,7 @@ const _DEFAULT: Omit<Options, "signal" | "fetcher"> = {
   maxInterval: 30,
   maxAttempts: 3,
   onTimeout: true,
+  onNetwork: true,
   noIdempotent: false,
   statusCodes: Object.freeze([500, 502, 503, 504, 408, 429]),
   respects: Object.freeze(["retry-after", "ratelimit-reset", "x-ratelimit-reset"]),
@@ -79,6 +80,7 @@ interface Options {
   maxInterval: number;
   maxAttempts: number;
   onTimeout: boolean;
+  onNetwork: boolean;
   noIdempotent: boolean;
   statusCodes: readonly number[];
   respects: readonly string[];
@@ -92,7 +94,7 @@ type InputArg = string | URL | Request | null;
 /** Internal retry-related options extracted from RetryOptions. */
 type InternalRetry = Pick<
   Options,
-  "interval" | "maxInterval" | "maxAttempts" | "onTimeout" | "noIdempotent" | "statusCodes" | "respects"
+  "interval" | "maxInterval" | "maxAttempts" | "onTimeout" | "onNetwork" | "noIdempotent" | "statusCodes" | "respects"
 >;
 
 /*=============== Main Codes ====================*/
@@ -364,6 +366,7 @@ function _getRetryOption(init: RequestInit, options?: RetryOptions | false): Int
     interval: Math.max(_correctNumber(_DEFAULT.interval, options?.interval), 0.01),
     maxInterval: Math.max(_correctNumber(_DEFAULT.maxInterval, options?.maxInterval), 1),
     onTimeout: options?.retryOnTimeout ?? _DEFAULT.onTimeout,
+    onNetwork: options?.retryOnNetwork ?? _DEFAULT.onNetwork,
     noIdempotent: options?.idempotentOnly ? _NO_IDEM.includes((init.method ?? "").toUpperCase()) : false,
     statusCodes: options?.statusCodes ?? _DEFAULT.statusCodes,
     respects: options?.respectHeaders ?? _DEFAULT.respects,
@@ -431,8 +434,9 @@ async function _shouldRetry(count: number, options: Options, r: Response | unkno
     if (!options.statusCodes.includes(r.status)) return false;
     return await _waitInterval(count, options, r.headers);
   } else {
-    if (!(r instanceof Error && r.name == "TimeoutError" && options.onTimeout)) return false;
-    return await _waitInterval(count, options);
+    if (r instanceof Error && r.name == "TimeoutError") return options.onTimeout && await _waitInterval(count, options);
+    if (r instanceof TypeError) return options.onNetwork && await _waitInterval(count, options);
+    return false;
   }
 }
 /** Creates new Request with ReadableStream body if present in options. @internal */

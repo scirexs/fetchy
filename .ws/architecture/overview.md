@@ -156,6 +156,8 @@ ADRs under `.ws/decision/`:
 - `001-native-scope-response-handling-only.md` — `native` controls only whether a
   non-OK status throws `HTTPStatusError`; it never disables retry, timeout, or
   jitter.
+- `002-retry-network-errors.md` — a generic network error (the `TypeError` from `fetch`) is
+  retried by default, controllable via `RetryOptions.retryOnNetwork`.
 
 Further design intent lives in `README.md`:
 

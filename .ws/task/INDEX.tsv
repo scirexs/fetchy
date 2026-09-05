@@ -1,3 +1,4 @@
 # <task_id>	<type>: <description>
 20260805_x2wrsz	fix: Stop native:true from suppressing status-code retry; scope the native option to response handling only (ADR 001)
 20260816_zzch7m	ci: Add GitHub Packages as a publishing destination in the release workflow (jsr → npm → GitHub Packages)
+20260905_juxf55	feat: Retry generic network errors (the TypeError fetch throws on connection failure) by default, controllable via the new RetryOptions.retryOnNetwork option.

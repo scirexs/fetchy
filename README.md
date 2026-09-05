@@ -267,6 +267,7 @@ interface RetryOptions {
   interval?: number;          // Base interval in seconds (default: 3)
   maxInterval?: number;       // Maximum interval cap (default: 30)
   retryOnTimeout?: boolean;   // Retry on timeout (default: true)
+  retryOnNetwork?: boolean;   // Retry on network error / thrown TypeError (default: true)
   idempotentOnly?: boolean;   // Only retry idempotent methods (default: false)
   statusCodes?: number[];     // Status codes to retry (default: [500, 502, 503, 504, 408, 429])
   respectHeaders?: string[];  // Headers to respect for retry timing
@@ -285,6 +286,7 @@ interface RetryOptions {
     interval: 3,      // 3 seconds base interval
     maxInterval: 30,  // 30 seconds maximum interval
     retryOnTimeout: true,     // Retry on timeout
+    retryOnNetwork: true,     // Retry on network error
     idempotentOnly: false,    // Retry all methods
     statusCodes: [500, 502, 503, 504, 408, 429],
     respectHeaders: ["retry-after", "ratelimit-reset", "x-ratelimit-reset"]

@@ -107,6 +107,12 @@ export interface RetryOptions {
    */
   retryOnTimeout?: boolean;
   /**
+   * Whether to retry on a generic network error (the `TypeError` thrown by `fetch` on a
+   * connection/DNS/TLS failure). User aborts and timeouts are not affected by this option.
+   * @default true
+   */
+  retryOnNetwork?: boolean;
+  /**
    * Whether to only retry on idempotent HTTP methods (GET, HEAD, PUT, DELETE, OPTIONS, TRACE).
    * @default false
    */

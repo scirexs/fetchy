@@ -71,6 +71,7 @@ Deno.test("_DEFAULT", async (t) => {
     assertEquals(_DEFAULT.maxInterval, 30);
     assertEquals(_DEFAULT.maxAttempts, 3);
     assertEquals(_DEFAULT.onTimeout, true);
+    assertEquals(_DEFAULT.onNetwork, true);
     assertEquals(_DEFAULT.noIdempotent, false);
     assertEquals(_DEFAULT.native, false);
     assertEquals(_DEFAULT.statusCodes, [500, 502, 503, 504, 408, 429]);
@@ -681,6 +682,14 @@ Deno.test("_getRetryOption", async (t) => {
     assertEquals(_getRetryOption({}).onTimeout, _DEFAULT.onTimeout);
   });
 
+  await t.step("uses custom retryOnNetwork", () => {
+    assertEquals(_getRetryOption({}, { retryOnNetwork: false }).onNetwork, false);
+  });
+
+  await t.step("defaults onNetwork to true", () => {
+    assertEquals(_getRetryOption({}).onNetwork, true);
+  });
+
   await t.step("idempotentOnly: true sets noIdempotent for POST/PATCH/CONNECT", () => {
     assertEquals(_getRetryOption({ method: "POST" }, { idempotentOnly: true }).noIdempotent, true);
     assertEquals(_getRetryOption({ method: "PATCH" }, { idempotentOnly: true }).noIdempotent, true);
@@ -1092,6 +1101,21 @@ Deno.test("_shouldRetry", async (t) => {
     assertEquals(await _shouldRetry(0, opts, err), false);
   });
 
+  await t.step("returns true for TypeError when onNetwork is true", async () => {
+    const opts = makeOptions({ onNetwork: true, interval: 0.01 });
+    assertEquals(await _shouldRetry(0, opts, new TypeError("Network error")), true);
+  });
+
+  await t.step("returns false for TypeError when onNetwork is false", async () => {
+    const opts = makeOptions({ onNetwork: false });
+    assertEquals(await _shouldRetry(0, opts, new TypeError("Network error")), false);
+  });
+
+  await t.step("returns false for AbortError", async () => {
+    const opts = makeOptions();
+    assertEquals(await _shouldRetry(0, opts, new DOMException("Aborted", "AbortError")), false);
+  });
+
   await t.step("returns false for non-timeout errors", async () => {
     const opts = makeOptions();
     assertEquals(await _shouldRetry(0, opts, new Error("Network error")), false);
@@ -1278,7 +1302,37 @@ Deno.test("_fetchWithRetry", async (t) => {
     }
   });
 
-  await t.step("throws on network error (no retry by default)", async () => {
+  await t.step("retries TypeError until attempts are exhausted by default", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new TypeError("network")));
+    try {
+      const opts = makeOptions({ interval: 0.01, maxAttempts: 3 });
+      await assertRejects(
+        () => _fetchWithRetry(new Request("https://example.com"), {}, opts),
+        TypeError,
+        "network",
+      );
+      assertSpyCalls(mockFetch, 3);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("does not retry TypeError when onNetwork is false", async () => {
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new TypeError("network")));
+    try {
+      const opts = makeOptions({ interval: 0.01, maxAttempts: 3, onNetwork: false });
+      await assertRejects(
+        () => _fetchWithRetry(new Request("https://example.com"), {}, opts),
+        TypeError,
+        "network",
+      );
+      assertSpyCalls(mockFetch, 1);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("does not retry non-TypeError rejection", async () => {
     const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("network")));
     try {
       const opts = makeOptions({ interval: 0.01, maxAttempts: 3 });
