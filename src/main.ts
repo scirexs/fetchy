@@ -445,14 +445,13 @@ function _includeStream(req: Request, options: Options): Request {
   const method = ["GET", "HEAD"].includes(req.method) ? "POST" : req.method;
   return new Request(req, { method, body: options.body });
 }
-/** Creates request cloning function with abort handling. @internal */
-function _cloneRequestF(req: Request): (cancel?: boolean) => Promise<Request> {
+/** Creates request cloning function with spare cancellation. @internal */
+function _cloneRequestF(req: Request): (cancel?: boolean, spare?: boolean) => Promise<Request> {
   let next: Request | undefined;
-  return async (cancel?: boolean) => {
+  return async (cancel?: boolean, spare?: boolean) => {
     if (cancel) await next?.body?.cancel();
-
     const result = next ?? req;
-    if (!cancel) next = next ? next.clone() : req.clone();
+    next = !cancel && spare ? result.clone() : undefined;
     return result;
   };
 }
@@ -463,7 +462,7 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
   for (let i = 0;; i++) {
     try {
       if (i === 0) creq = _cloneRequestF(_includeStream(req, options));
-      const res = await _fetchWithJitter(await creq!(), init, options);
+      const res = await _fetchWithJitter(await creq!(false, !options.noIdempotent && i < options.maxAttempts - 1), init, options);
       if (await _shouldRetry(i, options, res)) continue;
       if ((res.status >= 400 || res.status < 100) && !options.native) throw new HTTPStatusError(res);
       cancel = true;

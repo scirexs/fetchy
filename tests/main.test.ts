@@ -7,7 +7,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "jsr:@std/assert@^1.0.16";
-import { assertSpyCalls, stub } from "jsr:@std/testing@^1.0.16/mock";
+import { assertSpyCalls, spy, stub } from "jsr:@std/testing@^1.0.16/mock";
 import {
   _buildOption,
   _cloneRequestF,
@@ -1131,17 +1131,22 @@ Deno.test("_shouldRetry", async (t) => {
 
 /*=============== Request Cloning ==============*/
 Deno.test("_cloneRequestF", async (t) => {
-  await t.step("returns original request on first call", async () => {
+  await t.step("returns original request on first call without cloning", async () => {
     const req = new Request("https://example.com");
     const cloneF = _cloneRequestF(req);
-    const result = await cloneF();
-    assertStrictEquals(result, req);
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      assertStrictEquals(await cloneF(), req);
+      assertSpyCalls(cloneSpy, 0);
+    } finally {
+      cloneSpy.restore();
+    }
   });
 
   await t.step("returns cloned request on subsequent calls", async () => {
     const req = new Request("https://example.com");
     const cloneF = _cloneRequestF(req);
-    await cloneF();
+    await cloneF(false, true);
     const second = await cloneF();
     assertNotStrictEquals(second, req);
     assertEquals(second.url, req.url);
@@ -1150,17 +1155,30 @@ Deno.test("_cloneRequestF", async (t) => {
   await t.step("each subsequent call returns a distinct clone", async () => {
     const req = new Request("https://example.com");
     const cloneF = _cloneRequestF(req);
-    await cloneF();
-    const second = await cloneF();
+    await cloneF(false, true);
+    const second = await cloneF(false, true);
     const third = await cloneF();
     assertNotStrictEquals(second, third);
     assertEquals(second.url, third.url);
   });
 
+  await t.step("does not cancel a consumed request when no spare was prepared", async () => {
+    const req = new Request("https://example.com", { method: "POST", body: "test" });
+    const cloneF = _cloneRequestF(req);
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      await (await cloneF()).text();
+      await cloneF(true);
+      assertSpyCalls(cloneSpy, 0);
+    } finally {
+      cloneSpy.restore();
+    }
+  });
+
   await t.step("cancel=true does not throw and returns last prepared request", async () => {
     const req = new Request("https://example.com", { method: "POST", body: "test" });
     const cloneF = _cloneRequestF(req);
-    const first = await cloneF();
+    const first = await cloneF(false, true);
     const cancelled = await cloneF(true);
     assertEquals(first.url, cancelled.url);
   });
@@ -1259,6 +1277,92 @@ Deno.test("_fetchWithJitter", async (t) => {
 });
 
 Deno.test("_fetchWithRetry", async (t) => {
+  await t.step("does not clone a stream when maxAttempts is 1", async () => {
+    let body = "";
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      const opts = makeOptions({
+        body: new Blob(["payload"]).stream(),
+        maxAttempts: 1,
+        fetcher: async (req: Request) => {
+          body = await req.text();
+          return new Response("ok");
+        },
+      });
+      await _fetchWithRetry(new Request("https://example.com", { method: "POST" }), {}, opts);
+      assertEquals(body, "payload");
+      assertSpyCalls(cloneSpy, 0);
+    } finally {
+      cloneSpy.restore();
+    }
+  });
+
+  await t.step("does not clone a stream when noIdempotent is true", async () => {
+    let body = "";
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      const opts = makeOptions({
+        body: new Blob(["payload"]).stream(),
+        noIdempotent: true,
+        fetcher: async (req: Request) => {
+          body = await req.text();
+          return new Response("ok");
+        },
+      });
+      await _fetchWithRetry(new Request("https://example.com", { method: "POST" }), {}, opts);
+      assertEquals(body, "payload");
+      assertSpyCalls(cloneSpy, 0);
+    } finally {
+      cloneSpy.restore();
+    }
+  });
+
+  await t.step("clones maxAttempts minus one times when all attempts are used", async () => {
+    const bodies: string[] = [];
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      const opts = makeOptions({
+        body: new Blob(["payload"]).stream(),
+        maxAttempts: 3,
+        interval: 0.01,
+        maxInterval: 1,
+        native: true,
+        fetcher: async (req: Request) => {
+          bodies.push(await req.text());
+          return new Response("err", { status: 500 });
+        },
+      });
+      await _fetchWithRetry(new Request("https://example.com", { method: "POST" }), {}, opts);
+      assertEquals(bodies, ["payload", "payload", "payload"]);
+      assertSpyCalls(cloneSpy, 2);
+    } finally {
+      cloneSpy.restore();
+    }
+  });
+
+  await t.step("retries with a fresh stream body on each attempt", async () => {
+    const bodies: string[] = [];
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      const opts = makeOptions({
+        body: new Blob(["payload"]).stream(),
+        maxAttempts: 2,
+        interval: 0.01,
+        maxInterval: 1,
+        fetcher: async (req: Request) => {
+          bodies.push(await req.text());
+          return new Response(bodies.length === 1 ? "err" : "ok", { status: bodies.length === 1 ? 500 : 200 });
+        },
+      });
+      const resp = await _fetchWithRetry(new Request("https://example.com", { method: "POST" }), {}, opts);
+      assertEquals(resp.status, 200);
+      assertEquals(bodies, ["payload", "payload"]);
+      assertSpyCalls(cloneSpy, 1);
+    } finally {
+      cloneSpy.restore();
+    }
+  });
+
   await t.step("returns response on first successful fetch", async () => {
     const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
@@ -2514,6 +2618,54 @@ Deno.test("setFetchy", async (t) => {
 });
 
 Deno.test("fetchy", async (t) => {
+  await t.step("does not clone a stream body with retry false", async () => {
+    let body = "";
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      await fetchy("https://example.com", {
+        method: "POST",
+        body: new Blob(["payload"]).stream(),
+        retry: false,
+        fetcher: async (req) => {
+          assertInstanceOf(req, Request);
+          body = await req.text();
+          return new Response("ok");
+        },
+      });
+      assertEquals(body, "payload");
+      assertSpyCalls(cloneSpy, 0);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      cloneSpy.restore();
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("does not clone a POST stream body with idempotentOnly true", async () => {
+    let body = "";
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    const cloneSpy = spy(Request.prototype, "clone");
+    try {
+      await fetchy("https://example.com", {
+        method: "POST",
+        body: new Blob(["payload"]).stream(),
+        retry: { idempotentOnly: true },
+        fetcher: async (req) => {
+          assertInstanceOf(req, Request);
+          body = await req.text();
+          return new Response("ok");
+        },
+      });
+      assertEquals(body, "payload");
+      assertSpyCalls(cloneSpy, 0);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      cloneSpy.restore();
+      mockFetch.restore();
+    }
+  });
+
   await t.step("returns a FetchyResponse with parsing methods", async () => {
     const mockFetch = stub(
       globalThis,

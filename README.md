@@ -776,6 +776,11 @@ const response = await fetchy("https://api.example.com/stream", {
 });
 ```
 
+To allow a retry, fetchy clones the request before an attempt when another attempt is possible.
+For a `ReadableStream` body, this tees the stream and may buffer it in memory.
+With `retry: false`, `maxAttempts: 1`, or `idempotentOnly: true` and a non-idempotent method
+such as `POST`, only one attempt is possible, so no clone is made and the stream is sent without buffering.
+
 #### Retry-After Header Respect
 ```ts
 // Automatically respects Retry-After, RateLimit-Reset, X-RateLimit-Reset headers
