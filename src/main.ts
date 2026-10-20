@@ -324,7 +324,7 @@ function _correctNumber(dflt: number, num?: number): number {
 }
 /** Converts FetchyOptions to standard RequestInit format. @internal */
 function _getRequestInit(req: Request, url?: InputArg, options?: FetchyOptions): RequestInit {
-  const { method, body, timeout, retry, bearer, native, jitter, headers, signal, ...rest } = options ?? {};
+  const { method, body, timeout, retry, bearer, native, jitter, headers, signal, fetcher, base, url: _url, ...rest } = options ?? {};
   return {
     headers: _getHeaders(_mergeHeaders(req.headers, headers as Headers), options),
     method: method ?? (_isRequest(url || options?.url) ? req.method : body === undefined ? "GET" : "POST"),
@@ -479,7 +479,8 @@ async function _fetchWithRetry(req: Request, init: RequestInit, options: Options
 /** Executes fetch with initial jitter delay. @internal */
 async function _fetchWithJitter(req: Request, init: RequestInit, options: Options): Promise<Response> {
   await _wait(options.jitter, true);
-  return await options.fetcher(req, { ...init, signal: _withTimeout(options) });
+  const { fetcher } = options;
+  return await fetcher(req, { ...init, signal: _withTimeout(options) });
 }
 /** Adds parse method to Headers in place. @internal */
 function _makeFetchyHeaders(headers: Headers): FetchyHeaders {

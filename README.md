@@ -682,7 +682,7 @@ const data = await fetchy("https://api.example.com/data", {
 export default {
   async fetch(request, env) {
     return await fetchy("https://my-service/users", {
-      fetcher: env.MY_SERVICE.fetch,
+      fetcher: env.MY_SERVICE.fetch.bind(env.MY_SERVICE),
       retry: { maxAttempts: 3 },
       timeout: 5
     });
@@ -704,6 +704,8 @@ const client = fy({
 ```
 
 **Note:** All fetchy features (retry, timeout, jitter, body serialization, etc.) are applied around the custom `fetcher`, so you get fetchy's enhancements even when not using the global `fetch`.
+
+fetchy calls the fetcher without a receiver (`this` is `undefined`), so a method that needs `this` (such as a Service binding's `fetch` or a class method) must be bound or wrapped in an arrow function by the caller.
 
 #### Jitter for Load Distribution
 ```ts

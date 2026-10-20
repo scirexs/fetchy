@@ -212,10 +212,12 @@ default at a use site.
 documented floor. Invalid input (negative, `NaN`, `Infinity`) silently falls back
 to the default — the library never throws on option validation.
 
-**Rule — a new option must be added in all four places:** `_DEFAULT` (if it has a
-default), the internal `Options` interface, the public `FetchyOptions` /
-`RetryOptions` in `types.ts` with a `/** … @default … */` doc comment, and the
-`README.md` option table.
+**Rule — a new option must be added in all five places (where applicable):**
+`_DEFAULT` (if it has a default), the internal `Options` interface, the public
+`FetchyOptions` / `RetryOptions` in `types.ts` with a `/** … @default … */` doc
+comment, the `README.md` option table, and `_getRequestInit`'s destructuring
+exclusions for any new `FetchyOptions` key that is not a `RequestInit` member,
+so it never leaks into the `RequestInit`.
 
 **Rule — merge precedence is global (`setFetchy`) ← instance (`fy`) ← per-call**,
 implemented by `_buildOption`. `retry` is merged one level deep; `headers` are
@@ -225,8 +227,11 @@ merged key-by-key via `_mergeHeaders`. Preserve both behaviours.
 
 **Rule — the wrapper must remain removable.** Concretely:
 
-- `FetchyOptions` extends `RequestInit`; unknown keys pass through to `fetch` via
-  `...rest` in `_getRequestInit`.
+- `FetchyOptions` extends `RequestInit`; genuine `RequestInit` members, including
+  runtime extensions such as Cloudflare's `cf`, pass through to `fetch` via
+  `...rest` in `_getRequestInit`, while fetchy-only keys are stripped.
+- The fetcher is invoked without a receiver and is never bound or wrapped by
+  fetchy (see ADR 003).
 - Returned objects keep their native identity: `instanceof Response`,
   `instanceof Headers`, `instanceof Promise` must all stay true. This is why
   extensions are applied with `Object.assign` on the real instance rather than a

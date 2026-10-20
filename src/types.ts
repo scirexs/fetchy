@@ -66,6 +66,9 @@ export interface FetchyOptions extends Omit<RequestInit, "body"> {
   native?: boolean;
   /**
    * Custom fetch implementation used in place of the global `fetch`.
+   * Called without a receiver (`this` is `undefined`). A function that needs `this`, such as a
+   * Cloudflare Service binding's `fetch` or a class method, must be bound (e.g. `env.SVC.fetch.bind(env.SVC)`)
+   * or wrapped in an arrow function by the caller.
    * @default globalThis.fetch
    */
   fetcher?: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;

@@ -62,6 +62,18 @@ function makeFetchyOptions(overrides: Partial<FetchyOptions> = {}): FetchyOption
   return { headers: new Headers(), ...overrides };
 }
 
+/** Model a Service binding that requires its receiver and rejects a leaked fetcher option. */
+function makeReceiverCheckingOwner() {
+  const owner = {
+    fetch: function (this: unknown, _input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== owner) throw new TypeError("Illegal invocation");
+      if (Object.hasOwn(init ?? {}, "fetcher")) throw new TypeError("Incorrect type for the 'fetcher' field");
+      return new Response("ok");
+    },
+  };
+  return owner;
+}
+
 /*=============== _DEFAULT =====================*/
 Deno.test("_DEFAULT", async (t) => {
   await t.step("has expected default values", () => {
@@ -460,6 +472,38 @@ Deno.test("_getBody", async (t) => {
 });
 
 Deno.test("_getRequestInit", async (t) => {
+  await t.step("excludes fetchy-only keys from the request init", () => {
+    const req = new Request("https://example.com");
+    const fetcher = () => new Response("ok");
+    const init = _getRequestInit(
+      req,
+      undefined,
+      makeFetchyOptions({
+        fetcher,
+        base: "https://example.com",
+        url: "https://example.com/x",
+        timeout: 5,
+        retry: false,
+        bearer: "t",
+        native: true,
+        jitter: 1,
+      }),
+    );
+    for (const key of ["fetcher", "base", "url", "timeout", "retry", "bearer", "native", "jitter"]) {
+      assertEquals(Object.hasOwn(init, key), false);
+    }
+  });
+
+  await t.step("passes through genuine RequestInit members", () => {
+    const req = new Request("https://example.com");
+    const cf = { cacheTtl: 5 };
+    const options: AnyOptions = { credentials: "include", redirect: "manual", cf };
+    const init = _getRequestInit(req, undefined, makeFetchyOptions(options));
+    assertEquals(init.credentials, "include");
+    assertEquals(init.redirect, "manual");
+    assertStrictEquals((init as AnyOptions).cf, cf);
+  });
+
   await t.step("defaults to GET when no method and no body", () => {
     const req = new Request("https://example.com");
     const init = _getRequestInit(req, "https://example.com", makeFetchyOptions());
@@ -1193,6 +1237,23 @@ Deno.test("_cloneRequestF", async (t) => {
 
 /*=============== Fetch Execution ==============*/
 Deno.test("_fetchWithJitter", async (t) => {
+  await t.step("invokes fetcher without a receiver", async () => {
+    let receiver: unknown = "not called";
+    const fetcher = function (this: unknown, _input: RequestInfo | URL, _init?: RequestInit) {
+      receiver = this;
+      return new Response("ok");
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const resp = await _fetchWithJitter(new Request("https://example.com"), {}, makeOptions({ fetcher }));
+      assertEquals(resp.status, 200);
+      assertStrictEquals(receiver, undefined);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
   await t.step("executes fetch and forwards signal", async () => {
     const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
@@ -2618,6 +2679,68 @@ Deno.test("setFetchy", async (t) => {
 });
 
 Deno.test("fetchy", async (t) => {
+  await t.step("default fetcher is called without a receiver", async () => {
+    const mockFetch = stub(globalThis, "fetch", function (this: unknown, _input: RequestInfo | URL, _init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(new Response("ok"));
+    });
+    try {
+      const resp = await fetchy("https://example.com", { retry: false });
+      assertEquals(resp.status, 200);
+      assertSpyCalls(mockFetch, 1);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("works with a bound receiver-checking fetcher (workerd model)", async () => {
+    const owner = makeReceiverCheckingOwner();
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const resp = await fetchy("https://example.com", { fetcher: owner.fetch.bind(owner), retry: false });
+      assertEquals(resp.status, 200);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("rejects with an unbound receiver-checking fetcher", async () => {
+    const owner = makeReceiverCheckingOwner();
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      await assertRejects(() => fetchy("https://example.com", { fetcher: owner.fetch, retry: false }), TypeError, "Illegal invocation");
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
+  await t.step("globally configured fetcher is called without a receiver across retries", async () => {
+    const receivers: unknown[] = [];
+    const fetcher = function (this: unknown, _input: RequestInfo | URL, init?: RequestInit) {
+      receivers.push(this);
+      for (const key of ["fetcher", "base", "url", "timeout", "retry", "bearer", "native", "jitter"]) {
+        assertEquals(Object.hasOwn(init ?? {}, key), false);
+      }
+      assertExists(init?.signal);
+      assertEquals(init?.method, "GET");
+      assertInstanceOf(init?.headers, Headers);
+      return new Response("ok", { status: receivers.length === 1 ? 503 : 200 });
+    };
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      setFetchy({ fetcher, base: "https://example.com", url: "/x", retry: { interval: 0.01, maxInterval: 1, maxAttempts: 2 } });
+      const resp = await fetchy();
+      assertEquals(resp.status, 200);
+      assertEquals(receivers, [undefined, undefined]);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      setFetchy({});
+      mockFetch.restore();
+    }
+  });
+
   await t.step("does not clone a stream body with retry false", async () => {
     let body = "";
     const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
@@ -2737,6 +2860,20 @@ Deno.test("fetchy", async (t) => {
 });
 
 Deno.test("sfetchy", async (t) => {
+  await t.step("works with a bound receiver-checking fetcher", async () => {
+    const owner = makeReceiverCheckingOwner();
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const resp = await sfetchy("https://example.com", { fetcher: owner.fetch.bind(owner), retry: false });
+      assertInstanceOf(resp, Response);
+      assertEquals(resp.status, 200);
+      assertEquals(await sfetchy("https://example.com", { fetcher: owner.fetch, retry: false }), null);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
   await t.step("returns Response on success", async () => {
     const mockFetch = stub(globalThis, "fetch", () => Promise.resolve(new Response("ok", { status: 200 })));
     try {
@@ -2808,6 +2945,19 @@ Deno.test("sfetchy", async (t) => {
 });
 
 Deno.test("fy", async (t) => {
+  await t.step("instance methods work with a bound receiver-checking fetcher", async () => {
+    const owner = makeReceiverCheckingOwner();
+    const mockFetch = stub(globalThis, "fetch", () => Promise.reject(new Error("should not be called")));
+    try {
+      const client = fy({ fetcher: owner.fetch.bind(owner), retry: false });
+      assertEquals((await client.get("https://example.com")).status, 200);
+      assertEquals((await client.fetch("https://example.com")).status, 200);
+      assertSpyCalls(mockFetch, 0);
+    } finally {
+      mockFetch.restore();
+    }
+  });
+
   await t.step("returns an object with all standard and safe methods", () => {
     const client = fy({ base: "https://example.com" });
     for (const m of ["fetch", "get", "head", "post", "put", "patch", "delete"]) {

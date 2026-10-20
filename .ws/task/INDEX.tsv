@@ -3,3 +3,4 @@
 20260816_zzch7m	ci: Add GitHub Packages as a publishing destination in the release workflow (jsr → npm → GitHub Packages)
 20260905_juxf55	feat: Retry generic network errors (the TypeError fetch throws on connection failure) by default, controllable via the new RetryOptions.retryOnNetwork option.
 20260928_qencwy	fix: Clone the request (tee a stream body) only when another retry attempt is possible, and bump version to 0.11.1
+20261020_vdpduc	fix: Invoke the fetcher without a receiver and strip fetchy-only keys (fetcher/base/url) from the RequestInit so default and custom fetchers work on workerd and in browsers; document the contract, add ADR 003, bump to 0.11.2
