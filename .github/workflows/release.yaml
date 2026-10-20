@@ -28,8 +28,9 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       # must publish to jsr before npm because it will be a dirty commit
-      - name: Publish to jsr
-        run: deno publish
+      # skip jsr because deno is going to be closed
+      # - name: Publish to jsr
+      #   run: deno publish
 
       - name: Translate by dnt
         run: deno run -A ./build_npm.ts
